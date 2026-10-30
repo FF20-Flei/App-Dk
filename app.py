@@ -6,21 +6,21 @@ from PIL import Image
 import io
 
 # ---------------------------------------------------------
-# Seitenkonfiguration für optimale Handy- und Browseransicht
+# Seitenkonfiguration: Weitwinkel & schlankes Layout2
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Unser Aktivitäten-Bingo",
+    page_title="Unser Foto-Bingo",
     page_icon="🎯",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 
 DATA_FILE = "bingo_data.json"
-GRID_SIZE = 4  # 4x4 Gitter = 16 Felder
+GRID_SIZE = 4  # 4x4 = 16 Felder
 TOTAL_TILES = GRID_SIZE * GRID_SIZE
 
 # ---------------------------------------------------------
-# Hilfsfunktionen: Laden und Speichern der Daten
+# Daten laden & speichern
 # ---------------------------------------------------------
 def get_default_data():
     return {
@@ -38,16 +38,10 @@ def load_data():
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Fehlende Felder ergänzen, falls Gitter geändert wurde
                 for i in range(TOTAL_TILES):
                     k = str(i)
                     if k not in data:
-                        data[k] = {
-                            "title": f"Aktivität #{i+1}",
-                            "description": "",
-                            "image_b64": None,
-                            "done": False
-                        }
+                        data[k] = {"title": f"Aktivität #{i+1}", "description": "", "image_b64": None, "done": False}
                 return data
         except Exception:
             return get_default_data()
@@ -57,133 +51,119 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# Session State initialisieren
 if "bingo_data" not in st.session_state:
     st.session_state.bingo_data = load_data()
 
-# Immer neuesten Stand von Festplatte abgleichen
 data = load_data()
 st.session_state.bingo_data = data
 
 # ---------------------------------------------------------
-# CSS: Styling für Überschrift, Karten und Bingo-Stempel
+# CSS: Garantiertes 4x4-Gitter auf Handys & saubere Bildkarten
 # ---------------------------------------------------------
 st.markdown("""
 <style>
-    /* Hauptüberschrift */
-    .main-title {
+    /* Titel-Styling */
+    .bingo-header {
         text-align: center;
         font-family: 'Arial Black', Impact, sans-serif;
-        font-size: 3rem;
-        letter-spacing: 5px;
-        color: #12284c;
-        margin-bottom: 5px;
-        text-transform: uppercase;
+        font-size: 2.8rem;
+        letter-spacing: 4px;
+        color: #0f2b48;
+        margin-top: -20px;
+        margin-bottom: 2px;
     }
-    .sub-title {
+    .bingo-sub {
         text-align: center;
-        font-size: 1.1rem;
+        font-size: 0.95rem;
         color: #666;
-        margin-bottom: 25px;
+        margin-bottom: 18px;
     }
 
-    /* Kachel Container */
+    /* Zwingt Streamlit dazu, auch auf Smartphones 4 Spalten nebeneinander zu behalten */
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+    }
+
+    div[data-testid="column"] {
+        flex: 1 1 25% !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+        margin-bottom: 6px !important;
+    }
+
+    /* Quadratische Bildkarte (1:1 Ratio wie im echten Foto-Bingo) */
     .bingo-card {
         position: relative;
-        border: 2px solid #222;
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        border: 2px solid #1a2a44;
         border-radius: 8px;
         overflow: hidden;
-        background-color: #ffffff;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        min-height: 230px;
-    }
-
-    /* Bildbereich */
-    .img-box {
-        position: relative;
-        width: 100%;
-        height: 140px;
-        background-color: #f0f2f6;
+        background-color: #f3f4f6;
         display: flex;
         align-items: center;
         justify-content: center;
-        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.12);
     }
-    .img-box img {
+
+    .bingo-card img {
         width: 100%;
         height: 100%;
         object-fit: cover;
-    }
-    .img-placeholder {
-        color: #999;
-        font-size: 0.9rem;
-        font-style: italic;
+        display: block;
     }
 
-    /* Textbereich unter dem Bild */
-    .card-info {
-        padding: 8px 6px;
+    .placeholder-box {
         text-align: center;
-        flex-grow: 1;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        border-top: 2px solid #222;
-        background-color: #fdfdfd;
-    }
-    .card-title {
-        font-weight: 800;
-        font-size: 0.95rem;
-        color: #1a2a44;
-        line-height: 1.2;
-        margin-bottom: 2px;
-    }
-    .card-desc {
-        font-size: 0.75rem;
-        color: #555;
+        color: #888;
+        font-size: 0.8rem;
+        padding: 4px;
     }
 
-    /* DER BINGO STEMPEL */
+    /* Roter BINGO-Stempel */
     .stamp-overlay {
         position: absolute;
-        top: 25%;
+        top: 50%;
         left: 50%;
-        transform: translate(-50%, -50%) rotate(-15deg);
-        border: 4px solid #d90429;
+        transform: translate(-50%, -50%) rotate(-18deg);
+        border: 3px solid #d90429;
         color: #d90429;
-        font-family: 'Arial Black', sans-serif;
-        font-size: 1.6rem;
+        font-family: 'Arial Black', Impact, sans-serif;
+        font-size: clamp(0.75rem, 3.2vw, 1.3rem);
         font-weight: 900;
         text-transform: uppercase;
-        padding: 4px 14px;
-        border-radius: 6px;
-        background-color: rgba(255, 255, 255, 0.85);
-        box-shadow: 0 0 10px rgba(217, 4, 41, 0.4);
+        padding: 2px 6px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 0 8px rgba(217, 4, 41, 0.45);
         pointer-events: none;
         z-index: 10;
-        letter-spacing: 2px;
+        white-space: nowrap;
     }
 
-    /* Button-Abstände anpassen */
-    div[data-testid="stButton"] button {
-        margin-top: 4px;
-        font-size: 0.8rem;
-        padding: 2px 6px;
+    /* Buttons unter den Kacheln kompakt halten */
+    div[data-testid="stButton"] button, 
+    div[data-testid="stPopover"] button {
+        padding: 2px 4px !important;
+        font-size: 0.8rem !important;
+        height: 28px !important;
+        min-height: 28px !important;
+        margin-top: 2px !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Titelbereich
+# Überschrift
 # ---------------------------------------------------------
-st.markdown("<div class='main-title'>B I N G O</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-title'>Unser gemeinsames Aktivitäten-Board 💕</div>", unsafe_allow_html=True)
+st.markdown("<div class='bingo-header'>B I N G O</div>", unsafe_allow_html=True)
+st.markdown("<div class='bingo-sub'>Unser gemeinsames Aktivitäten-Board 💕</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 4x4 Spielfeld generieren
+# 4x4 Bingo-Gitter (Tabelle)
 # ---------------------------------------------------------
 for row in range(GRID_SIZE):
     cols = st.columns(GRID_SIZE)
@@ -193,67 +173,61 @@ for row in range(GRID_SIZE):
         item = data[k]
 
         with cols[col]:
-            # Stempel-HTML generieren, falls erledigt
+            # Stempel erzeugen, wenn erledigt
             stamp_html = "<div class='stamp-overlay'>BINGO!</div>" if item.get("done", False) else ""
 
-            # Bild-HTML erstellen
+            # Nur das Bild (oder sauberer Platzhalter)
             if item.get("image_b64"):
                 img_src = f"data:image/jpeg;base64,{item['image_b64']}"
-                img_tag = f"<img src='{img_src}' alt='{item['title']}'>"
+                content_html = f"<img src='{img_src}' alt='Feld {idx+1}'>"
             else:
-                img_tag = "<div class='img-placeholder'>📷 Noch kein Bild</div>"
+                title_preview = item.get("title", f"#{idx+1}")[:10]
+                content_html = f"<div class='placeholder-box'>📷<br><b>{title_preview}</b></div>"
 
-            # Kachel rendern
-            desc_text = f"<div class='card-desc'>{item.get('description', '')}</div>" if item.get('description') else ""
-            card_html = f"""
-            <div class='bingo-card'>
-                <div class='img-box'>
-                    {img_tag}
-                    {stamp_html}
-                </div>
-                <div class='card-info'>
-                    <div class='card-title'>{item.get('title', 'Aktivität')}</div>
-                    {desc_text}
-                </div>
-            </div>
-            """
+            # Kachel ohne Einrückungen rendern (verhindert Code-Block-Bug)
+            card_html = f"<div class='bingo-card'>{content_html}{stamp_html}</div>"
             st.markdown(card_html, unsafe_allow_html=True)
 
-            # Steuerungs-Buttons für das Feld
-            btn_col1, btn_col2 = st.columns([1, 1])
-            with btn_col1:
-                done_btn_label = "↩️ Reset" if item.get("done") else "🎯 Bingo!"
-                if st.button(done_btn_label, key=f"toggle_{idx}", use_container_width=True):
+            # Zwei kompakte Buttons: 🎯 zum Abhaken, ✏️ zum Bearbeiten & Bild hochladen
+            btn1, btn2 = st.columns(2)
+            with btn1:
+                btn_symbol = "↩️" if item.get("done") else "🎯"
+                if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help="Als erledigt markieren"):
                     data[k]["done"] = not data[k].get("done", False)
                     save_data(data)
                     st.rerun()
 
-            with btn_col2:
-                # Expander / Popover zum Bearbeiten des Feldes
-                with st.popover("✏️ Edit", use_container_width=True):
-                    st.write(f"**Feld #{idx+1} bearbeiten**")
-                    new_title = st.text_input("Titel / Aktivität", value=item.get("title", ""), key=f"t_{idx}")
-                    new_desc = st.text_input("Beschreibung / Notiz", value=item.get("description", ""), key=f"d_{idx}")
-                    uploaded_file = st.file_uploader("Bild / Screenshot hochladen", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
+            with btn2:
+                with st.popover("✏️", use_container_width=True, help="Bild & Notiz bearbeiten"):
+                    st.markdown(f"**Feld #{idx+1} bearbeiten**")
+                    new_title = st.text_input("Name der Aktivität", value=item.get("title", ""), key=f"t_{idx}")
+                    new_desc = st.text_input("Notiz (optional)", value=item.get("description", ""), key=f"d_{idx}")
+                    uploaded_file = st.file_uploader("Screenshot / Foto", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
 
-                    if st.button("Speichern", key=f"save_{idx}", type="primary"):
+                    if st.button("Speichern", key=f"s_{idx}", type="primary"):
                         data[k]["title"] = new_title
                         data[k]["description"] = new_desc
                         if uploaded_file is not None:
                             image = Image.open(uploaded_file)
-                            # Automatische Bildskalierung für schnelle Ladezeiten
-                            image.thumbnail((600, 600))
-                            buffered = io.BytesIO()
-                            image.convert("RGB").save(buffered, format="JPEG", quality=80)
-                            data[k]["image_b64"] = base64.b64encode(buffered.getvalue()).decode()
+                            image.thumbnail((500, 500))
+                            buf = io.BytesIO()
+                            image.convert("RGB").save(buf, format="JPEG", quality=82)
+                            data[k]["image_b64"] = base64.b64encode(buf.getvalue()).decode()
                         save_data(data)
-                        st.success("Aktualisiert!")
+                        st.success("Gespeichert!")
                         st.rerun()
 
 st.write("---")
 
 # ---------------------------------------------------------
-# Hilfsfunktionen & Gesamtstatus
+# Zähler & Reset-Option
 # ---------------------------------------------------------
 done_count = sum(1 for v in data.values() if v.get("done"))
-st.info(f"🏆 Fortschritt: **{done_count} von {TOTAL_TILES}** Aktivitäten als BINGO abgehakt!")
+st.info(f"🏆 Fortschritt: **{done_count} von {TOTAL_TILES}** Feldern abgehakt!")
+
+with st.expander("⚙️ Optionen"):
+    if st.button("🔄 Alle Bingo-Stempel zurücksetzen"):
+        for k in data:
+            data[k]["done"] = False
+        save_data(data)
+        st.rerun()
