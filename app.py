@@ -2,9 +2,10 @@ import streamlit as st
 import json
 import os
 import base64
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 import datetime
+import random
 
 # ---------------------------------------------------------
 # Seitenkonfiguration: Schlankes Layout
@@ -93,6 +94,92 @@ def save_data(data, create_backup=True):
     if create_backup:
         save_backup(data)
 
+# ---------------------------------------------------------
+# Export-Funktion: Komplettes Board als Bild generieren
+# ---------------------------------------------------------
+def generate_board_image(board_data):
+    card_size = 300
+    gap = 12
+    divider_size = 20
+    header_height = 130
+    footer_height = 40
+    
+    # Gesamtbreite & Gesamthöhe (mit den markanten Trennern vor Spalte 4 & Zeile 4)
+    width = card_size * 4 + gap * 3 + divider_size + 40
+    height = header_height + card_size * 4 + gap * 3 + divider_size + footer_height
+    
+    img = Image.new("RGB", (width, height), color="#0b1320")
+    draw = ImageDraw.Draw(img)
+    
+    # Titel zeichnen
+    draw.text((width // 2, 45), "B I N G O", fill="#ffffff", anchor="mm")
+    draw.text((width // 2, 90), "Nora & Dominik Aktivitäten-Board", fill="#e2e8f0", anchor="mm")
+    
+    for r in range(GRID_SIZE):
+        for c in range(GRID_SIZE):
+            idx = r * GRID_SIZE + c
+            item = board_data.get(str(idx), {})
+            is_reward = (r == 3 or c == 3)
+            
+            # Koordinaten berechnen
+            extra_x = divider_size if c == 3 else 0
+            extra_y = divider_size if r == 3 else 0
+            x = 20 + c * (card_size + gap) + extra_x
+            y = header_height + r * (card_size + gap) + extra_y
+            
+            # Kachel-Hintergrund
+            tile_img = Image.new("RGB", (card_size, card_size), color="#ffffff")
+            
+            # Wenn Bild vorhanden, einpassen
+            if item.get("image_b64"):
+                try:
+                    raw_b64 = base64.b64decode(item["image_b64"])
+                    loaded = Image.open(io.BytesIO(raw_b64)).convert("RGB")
+                    loaded.thumbnail((card_size, card_size))
+                    # Zentriert einfügen
+                    pos_x = (card_size - loaded.width) // 2
+                    pos_y = (card_size - loaded.height) // 2
+                    tile_img.paste(loaded, (pos_x, pos_y))
+                except Exception:
+                    pass
+            
+            tile_draw = ImageDraw.Draw(tile_img)
+            
+            # Beschriftungsbalken unten
+            tile_draw.rectangle([0, card_size - 48, card_size, card_size], fill=(255, 255, 255, 240))
+            title_text = item.get("title", f"Aktivität #{idx+1}")
+            if len(title_text) > 22:
+                title_text = title_text[:20] + "..."
+            tile_draw.text((card_size // 2, card_size - 24), title_text, fill="#111111", anchor="mm")
+            
+            # BINGO-Stempel zeichnen, falls erledigt
+            if item.get("done"):
+                tile_draw.rectangle([35, 110, card_size - 35, 170], fill=(255, 255, 255, 230), outline="#d90429", width=4)
+                tile_draw.text((card_size // 2, 140), "B I N G O !", fill="#d90429", anchor="mm")
+            
+            # In das Hauptbild einfügen
+            img.paste(tile_img, (x, y))
+            
+            # Grüner Rand bei Belohnungen, sonst dunkler Rand
+            border_col = "#2ecc71" if is_reward else "#2b3d52"
+            border_w = 6 if is_reward else 2
+            draw.rectangle([x, y, x + card_size, y + card_size], outline=border_col, width=border_w)
+    
+    # Vertikaler Trennbalken vor Spalte 4
+    div_x = 20 + 3 * (card_size + gap) + (divider_size // 2) - 3
+    draw.rectangle([div_x, header_height, div_x + 6, height - footer_height], fill="#ffffff")
+    
+    # Horizontaler Trennbalken vor Zeile 4
+    div_y = header_height + 3 * (card_size + gap) + (divider_size // 2) - 3
+    draw.rectangle([20, div_y, width - 20, div_y + 6], fill="#ffffff")
+    
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+# ---------------------------------------------------------
+# Session State Initialisierung
+# ---------------------------------------------------------
 if "bingo_data" not in st.session_state:
     st.session_state.bingo_data = load_data()
 
@@ -100,7 +187,7 @@ data = load_data()
 st.session_state.bingo_data = data
 
 # ---------------------------------------------------------
-# CSS: Echtes 4x4-Gitter, markante Trenner & Grüner Rahmen
+# CSS: Responsives 4x4-Layout, Trenner & Stempel
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -153,7 +240,7 @@ st.markdown("""
         box-sizing: border-box !important;
     }
 
-    /* Vertikaler Trenner: Markante dunkle Trennlinie vor der 4. Spalte */
+    /* Vertikaler Trenner: Markante Trennlinie vor der 4. Spalte */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(4),
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {
         border-left: 5px solid #0b1320 !important;
@@ -223,7 +310,7 @@ st.markdown("""
         z-index: 1;
     }
 
-    /* Beschriftungs-Balken für den Aktivitäts- bzw. Belohnungsnamen */
+    /* Beschriftungs-Balken */
     .card-title-bar {
         position: relative;
         z-index: 2;
@@ -305,7 +392,7 @@ st.markdown("<div class='bingo-header'>B I N G O</div>", unsafe_allow_html=True)
 st.markdown("<div class='bingo-sub'>Nora & Dominik Aktivitäten-Board 😊</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Prüfung auf erreichte 3er-Reihen / Spalten (Belohnungen)
+# Prüfung auf erreichte 3er-Reihen / Spalten (Belohnungen) & Ballons
 # ---------------------------------------------------------
 completed_rewards = []
 
@@ -326,15 +413,19 @@ if data["0"].get("done") and data["5"].get("done") and data["10"].get("done"):
     diag_reward = data["15"].get("title", "Hauptbelohnung")
     completed_rewards.append(f"👑 **Diagonale voll:** Haupt-Belohnung *'{diag_reward}'* (rechts unten) freigeschaltet!")
 
+# Wenn neue Belohnungen vorhanden sind: Feier mit Ballons!
 if completed_rewards:
     for msg in completed_rewards:
         st.success(msg)
+    if "balloons_fired" not in st.session_state:
+        st.balloons()
+        st.session_state["balloons_fired"] = True
 
 # ---------------------------------------------------------
 # 4x4 Bingo-Gitter (3x3 Aktivitäten + 7 Belohnungen)
 # ---------------------------------------------------------
 for row in range(GRID_SIZE):
-    # Vor der 4. Zeile den horizontalen schwarzen Trennbalken rendern
+    # Vor der 4. Zeile den horizontalen Trennbalken rendern
     if row == 3:
         st.markdown("<div class='horizontal-divider'></div>", unsafe_allow_html=True)
 
@@ -377,6 +468,9 @@ for row in range(GRID_SIZE):
                 btn_symbol = "↩️" if item.get("done") else "🎯"
                 if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help="Erledigt / Stempel"):
                     data[k]["done"] = not data[k].get("done", False)
+                    # Wenn abgehakt, Ballons freischalten
+                    if data[k]["done"]:
+                        st.session_state.pop("balloons_fired", None)
                     save_data(data)
                     st.rerun()
 
@@ -405,6 +499,42 @@ for row in range(GRID_SIZE):
 st.write("---")
 
 # ---------------------------------------------------------
+# Feature: 🎲 Zufalls-Date-Picker ("Was machen wir heute?")
+# ---------------------------------------------------------
+col_dice, col_export = st.columns(2)
+
+with col_dice:
+    if st.button("🎲 Was machen wir heute?", use_container_width=True, help="Wählt per Zufall eine offene Aktivität aus"):
+        # Nur Aktivitäten aus dem 3x3 Bereich (Zeile 0-2, Spalte 0-2), die noch nicht erledigt sind
+        open_activities = []
+        for r in range(3):
+            for c in range(3):
+                idx = r * GRID_SIZE + c
+                if not data[str(idx)].get("done", False):
+                    act_title = data[str(idx)].get("title", f"Aktivität #{idx+1}")
+                    open_activities.append(act_title)
+        
+        if open_activities:
+            chosen = random.choice(open_activities)
+            st.session_state["picked_date"] = chosen
+        else:
+            st.session_state["picked_date"] = "🎉 Alle 9 Aktivitäten sind bereits erledigt! Zeit für die Belohnungen!"
+
+if "picked_date" in st.session_state:
+    st.info(f"✨ **Vorschlag für euer Date:** {st.session_state['picked_date']}")
+
+with col_export:
+    board_bytes = generate_board_image(data)
+    st.download_button(
+        label="📥 Board als Bild laden",
+        data=board_bytes,
+        file_name="Nora_und_Dominik_Bingo_Board.png",
+        mime="image/png",
+        use_container_width=True,
+        help="Speichert das komplette Board als hochauflösendes Bild auf eurem Smartphone/PC"
+    )
+
+# ---------------------------------------------------------
 # Fortschritt & Optionen mit Speicherpunkten
 # ---------------------------------------------------------
 done_count = sum(1 for v in data.values() if v.get("done"))
@@ -413,7 +543,7 @@ st.info(f"🏆 Fortschritt: **{done_count} von {TOTAL_TILES}** Feldern erledigt!
 with st.expander("⚙️ Optionen & Speicherpunkte"):
     st.markdown("### 💾 Speicherpunkte wiederherstellen")
     history = load_history()
-    
+
     if history:
         # Letzte 3 Sicherungspunkte (neuester zuerst)
         options = {
@@ -425,12 +555,11 @@ with st.expander("⚙️ Optionen & Speicherpunkte"):
             options=list(options.keys()),
             key="history_selector"
         )
-        
+
         c1, c2 = st.columns(2)
         with c1:
             if st.button("📥 Stand wiederherstellen", type="primary", use_container_width=True):
                 restored_data = options[selected_label]
-                # Wiederherstellen ohne sofort neues History-Element anzulegen
                 save_data(restored_data, create_backup=False)
                 st.success(f"{selected_label} erfolgreich wiederhergestellt!")
                 st.rerun()
@@ -448,7 +577,6 @@ with st.expander("⚙️ Optionen & Speicherpunkte"):
     st.markdown("---")
     st.markdown("### 🔄 Board zurücksetzen")
     if st.button("Alle Bingo-Stempel entfernen", use_container_width=True):
-        # Vor dem Zurücksetzen aktuellen Stand automatisch als Backup abspeichern!
         save_backup(data)
         for k in data:
             data[k]["done"] = False
