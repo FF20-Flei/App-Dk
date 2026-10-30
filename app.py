@@ -9,29 +9,33 @@ import io
 # Seitenkonfiguration: Schlankes Layout
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Unser Foto-Bingo",
-    page_icon="🎯",
+    page_title="Nora & Dominik Aktivitäten-Board",
+    page_icon="😊",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
 DATA_FILE = "bingo_data.json"
-GRID_SIZE = 4  # 4x4 = 16 Felder
+GRID_SIZE = 4  # 4x4 = 16 Felder (3x3 Aktivitäten + 7 Belohnungen)
 TOTAL_TILES = GRID_SIZE * GRID_SIZE
 
 # ---------------------------------------------------------
 # Daten laden & speichern
 # ---------------------------------------------------------
 def get_default_data():
-    return {
-        str(i): {
-            "title": f"Aktivität #{i+1}",
-            "description": "",
-            "image_b64": None,
-            "done": False
-        }
-        for i in range(TOTAL_TILES)
-    }
+    defaults = {}
+    for r in range(GRID_SIZE):
+        for c in range(GRID_SIZE):
+            idx = r * GRID_SIZE + c
+            is_reward = (r == 3 or c == 3)
+            default_title = f"🎁 Belohnung #{idx+1}" if is_reward else f"Aktivität #{idx+1}"
+            defaults[str(idx)] = {
+                "title": default_title,
+                "description": "",
+                "image_b64": None,
+                "done": False
+            }
+    return defaults
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -41,7 +45,15 @@ def load_data():
                 for i in range(TOTAL_TILES):
                     k = str(i)
                     if k not in data:
-                        data[k] = {"title": f"Aktivität #{i+1}", "description": "", "image_b64": None, "done": False}
+                        r = i // GRID_SIZE
+                        c = i % GRID_SIZE
+                        is_reward = (r == 3 or c == 3)
+                        data[k] = {
+                            "title": f"🎁 Belohnung" if is_reward else f"Aktivität #{i+1}",
+                            "description": "",
+                            "image_b64": None,
+                            "done": False
+                        }
                 return data
         except Exception:
             return get_default_data()
@@ -58,7 +70,7 @@ data = load_data()
 st.session_state.bingo_data = data
 
 # ---------------------------------------------------------
-# CSS: Echtes 4x4-Gitter, Abstände & Grüner Rand
+# CSS: Echtes 4x4-Gitter, markante Trenner & Grüner Rahmen
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -75,16 +87,17 @@ st.markdown("""
     .bingo-header {
         text-align: center;
         font-family: 'Arial Black', Impact, sans-serif;
-        font-size: clamp(2rem, 7vw, 3rem);
-        letter-spacing: 4px;
+        font-size: clamp(2.2rem, 7.5vw, 3.2rem);
+        letter-spacing: 5px;
         color: #1e3a5f;
         margin-top: -15px;
         margin-bottom: 2px;
     }
     .bingo-sub {
         text-align: center;
-        font-size: clamp(0.75rem, 3vw, 0.95rem);
-        color: #888;
+        font-size: clamp(0.85rem, 3.2vw, 1.05rem);
+        color: #e2e8f0;
+        font-weight: 600;
         margin-bottom: 15px;
     }
 
@@ -98,7 +111,7 @@ st.markdown("""
         margin-bottom: 6px !important;
     }
 
-    /* 3. Spaltenbreite: Spalten 1-3 ca. 24%, Spalte 4 hat etwas Abstand */
+    /* 3. Spaltenbreite: Spalten 1-4 */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
         width: calc(25% - 4px) !important;
@@ -107,12 +120,15 @@ st.markdown("""
         flex: 1 1 calc(25% - 4px) !important;
         padding: 0 !important;
         margin: 0 !important;
+        box-sizing: border-box !important;
     }
 
-    /* Extra Abstand für die ganz rechte 4. Spalte */
+    /* Vertikaler Trenner: Markante dunkle Trennlinie vor der 4. Spalte */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(4),
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {
-        margin-left: 6px !important;
+        border-left: 5px solid #0b1320 !important;
+        padding-left: 5px !important;
+        margin-left: 3px !important;
     }
 
     /* 4. Die beiden Buttons unter jeder Kachel: je genau 50% */
@@ -128,6 +144,8 @@ st.markdown("""
         max-width: 50% !important;
         flex: 1 1 50% !important;
         margin-left: 0 !important;
+        border-left: none !important;
+        padding-left: 0 !important;
     }
 
     /* 5. Quadratische Bildkarte (1:1 Ratio) */
@@ -147,10 +165,10 @@ st.markdown("""
         box-sizing: border-box;
     }
 
-    /* Grüner Rand für die 4. Spalte und 4. Zeile */
+    /* Grüner Rand für die 4. Spalte und 4. Zeile (Belohnungsfelder) */
     .green-border {
         border: 3.5px solid #2ecc71 !important;
-        box-shadow: 0 0 7px rgba(46, 204, 113, 0.4) !important;
+        box-shadow: 0 0 8px rgba(46, 204, 113, 0.5) !important;
     }
 
     .bingo-card img {
@@ -175,14 +193,14 @@ st.markdown("""
         z-index: 1;
     }
 
-    /* Beschriftungs-Balken für den Aktivitätsnamen */
+    /* Beschriftungs-Balken für den Aktivitäts- bzw. Belohnungsnamen */
     .card-title-bar {
         position: relative;
         z-index: 2;
         width: 100%;
-        background: rgba(255, 255, 255, 0.92);
+        background: rgba(255, 255, 255, 0.93);
         color: #111;
-        font-size: clamp(0.52rem, 1.8vw, 0.72rem);
+        font-size: clamp(0.5rem, 1.8vw, 0.72rem);
         font-weight: 700;
         text-align: center;
         padding: 3px 2px;
@@ -193,10 +211,14 @@ st.markdown("""
         white-space: nowrap;
     }
 
-    /* Trennbalken vor der 4. Zeile */
-    .row-separator {
+    /* Horizontaler Trennbalken vor der 4. Zeile */
+    .horizontal-divider {
         width: 100%;
-        height: 10px;
+        height: 8px;
+        background-color: #0b1320;
+        border-radius: 4px;
+        margin-top: 6px;
+        margin-bottom: 12px;
     }
 
     /* 6. Roter BINGO-Stempel */
@@ -235,12 +257,10 @@ st.markdown("""
         border-radius: 5px !important;
     }
 
-    /* Pfeil-Icon beim Stift ausblenden für maximalen Platz */
     div[data-testid="stPopover"] button svg {
         display: none !important;
     }
 
-    /* Popover-Popup auf Mobilgeräten optimal öffnen */
     div[data-testid="stPopoverBody"] {
         max-width: 90vw !important;
         z-index: 999999 !important;
@@ -252,15 +272,41 @@ st.markdown("""
 # Kopfbereich
 # ---------------------------------------------------------
 st.markdown("<div class='bingo-header'>B I N G O</div>", unsafe_allow_html=True)
-st.markdown("<div class='bingo-sub'>Unser gemeinsames Aktivitäten-Board 💕</div>", unsafe_allow_html=True)
+st.markdown("<div class='bingo-sub'>Nora & Dominik Aktivitäten-Board 😊</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 4x4 Bingo-Gitter
+# Prüfung auf erreichte 3er-Reihen / Spalten (Belohnungen)
+# ---------------------------------------------------------
+completed_rewards = []
+
+# Zeilen 0, 1, 2 prüfen (Aktivitäten in Spalten 0, 1, 2)
+for r in range(3):
+    if all(data[str(r * GRID_SIZE + c)].get("done", False) for c in range(3)):
+        reward_name = data[str(r * GRID_SIZE + 3)].get("title", f"Belohnung Zeile {r+1}")
+        completed_rewards.append(f"🎉 **Reihe {r+1} voll:** Ihr habt die Belohnung *'{reward_name}'* (rechts) freigeschaltet!")
+
+# Spalten 0, 1, 2 prüfen (Aktivitäten in Zeilen 0, 1, 2)
+for c in range(3):
+    if all(data[str(r * GRID_SIZE + c)].get("done", False) for r in range(3)):
+        reward_name = data[str(3 * GRID_SIZE + c)].get("title", f"Belohnung Spalte {c+1}")
+        completed_rewards.append(f"🌟 **Spalte {c+1} voll:** Ihr habt die Belohnung *'{reward_name}'* (unten) freigeschaltet!")
+
+# Diagonale 1 (0, 5, 10)
+if data["0"].get("done") and data["5"].get("done") and data["10"].get("done"):
+    diag_reward = data["15"].get("title", "Hauptbelohnung")
+    completed_rewards.append(f"👑 **Diagonale voll:** Haupt-Belohnung *'{diag_reward}'* (rechts unten) freigeschaltet!")
+
+if completed_rewards:
+    for msg in completed_rewards:
+        st.success(msg)
+
+# ---------------------------------------------------------
+# 4x4 Bingo-Gitter (3x3 Aktivitäten + 7 Belohnungen)
 # ---------------------------------------------------------
 for row in range(GRID_SIZE):
-    # Vor der letzten (4.) Zeile einen visuellen Abstandsbalken einfügen
+    # Vor der 4. Zeile den horizontalen schwarzen Trennbalken rendern
     if row == 3:
-        st.markdown("<div class='row-separator'></div>", unsafe_allow_html=True)
+        st.markdown("<div class='horizontal-divider'></div>", unsafe_allow_html=True)
 
     cols = st.columns(GRID_SIZE)
     for col in range(GRID_SIZE):
@@ -268,29 +314,30 @@ for row in range(GRID_SIZE):
         k = str(idx)
         item = data[k]
 
-        # Prüfen, ob das Feld zur 4. Zeile (row == 3) oder 4. Spalte (col == 3) gehört
-        is_green_border = (row == 3 or col == 3)
-        border_class = " green-border" if is_green_border else ""
+        is_reward = (row == 3 or col == 3)
+        border_class = " green-border" if is_reward else ""
 
         with cols[col]:
             # Stempel erzeugen, wenn erledigt
             stamp_html = "<div class='stamp-overlay'>BINGO!</div>" if item.get("done", False) else ""
 
-            # Titel der Aktivität ermitteln
-            activity_title = item.get("title", f"Aktivität #{idx+1}").strip()
-            if not activity_title:
-                activity_title = f"Aktivität #{idx+1}"
+            # Titel ermitteln
+            default_label = f"🎁 Belohnung" if is_reward else f"Aktivität #{idx+1}"
+            title_text = item.get("title", default_label).strip()
+            if not title_text:
+                title_text = default_label
 
-            title_html = f"<div class='card-title-bar' title='{activity_title}'>{activity_title}</div>"
+            title_html = f"<div class='card-title-bar' title='{title_text}'>{title_text}</div>"
 
             # Bild oder Platzhalter laden
             if item.get("image_b64"):
                 img_src = f"data:image/jpeg;base64,{item['image_b64']}"
-                content_html = f"<img src='{img_src}' alt='{activity_title}'>"
+                content_html = f"<img src='{img_src}' alt='{title_text}'>"
             else:
-                content_html = "<div class='placeholder-box'>📷</div>"
+                icon = "🎁" if is_reward else "📷"
+                content_html = f"<div class='placeholder-box'>{icon}</div>"
 
-            # Kachel rendern (Bild/Platzhalter + Titelbar + optionaler Stempel)
+            # Kachel rendern
             card_html = f"<div class='bingo-card{border_class}'>{content_html}{title_html}{stamp_html}</div>"
             st.markdown(card_html, unsafe_allow_html=True)
 
@@ -298,17 +345,19 @@ for row in range(GRID_SIZE):
             btn1, btn2 = st.columns(2)
             with btn1:
                 btn_symbol = "↩️" if item.get("done") else "🎯"
-                if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help="Erledigt"):
+                if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help="Erledigt / Stempel"):
                     data[k]["done"] = not data[k].get("done", False)
                     save_data(data)
                     st.rerun()
 
             with btn2:
-                with st.popover("✏️", use_container_width=True, help="Bearbeiten"):
-                    st.markdown(f"**Feld #{idx+1} bearbeiten**")
-                    new_title = st.text_input("Aktivität", value=item.get("title", ""), key=f"t_{idx}")
+                pop_help = "Belohnung bearbeiten" if is_reward else "Aktivität bearbeiten"
+                with st.popover("✏️", use_container_width=True, help=pop_help):
+                    field_type = "🎁 Belohnung" if is_reward else "Aktivität"
+                    st.markdown(f"**{field_type} #{idx+1} anpassen**")
+                    new_title = st.text_input("Name", value=item.get("title", ""), key=f"t_{idx}")
                     new_desc = st.text_input("Notiz (optional)", value=item.get("description", ""), key=f"d_{idx}")
-                    uploaded_file = st.file_uploader("Foto hochladen", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
+                    uploaded_file = st.file_uploader("Foto / Screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
 
                     if st.button("Speichern", key=f"s_{idx}", type="primary", use_container_width=True):
                         data[k]["title"] = new_title
