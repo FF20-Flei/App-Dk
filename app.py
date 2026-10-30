@@ -36,8 +36,10 @@ def get_default_data():
                 "title": default_title,
                 "description": "",
                 "image_b64": None,
-                "done": False
+                "done": False,
+                "done_date": None
             }
+    defaults["_celebrated_lines"] = []
     return defaults
 
 def load_data():
@@ -55,8 +57,13 @@ def load_data():
                             "title": f"🎁 Belohnung" if is_reward else f"Aktivität #{i+1}",
                             "description": "",
                             "image_b64": None,
-                            "done": False
+                            "done": False,
+                            "done_date": None
                         }
+                    elif "done_date" not in data[k]:
+                        data[k]["done_date"] = None
+                if "_celebrated_lines" not in data:
+                    data["_celebrated_lines"] = []
                 return data
         except Exception:
             return get_default_data()
@@ -80,7 +87,6 @@ def save_backup(data_snapshot):
         "timestamp": now_str,
         "data": data_snapshot
     })
-    # Nur die neuesten 3 Speicherpunkte behalten
     history = history[-3:]
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -103,86 +109,78 @@ def generate_board_image(board_data):
     divider_size = 20
     header_height = 130
     footer_height = 40
-    
-    # Gesamtbreite & Gesamthöhe (mit den markanten Trennern vor Spalte 4 & Zeile 4)
+
     width = card_size * 4 + gap * 3 + divider_size + 40
     height = header_height + card_size * 4 + gap * 3 + divider_size + footer_height
-    
+
     img = Image.new("RGB", (width, height), color="#0b1320")
     draw = ImageDraw.Draw(img)
-    
+
     # Titel zeichnen
     draw.text((width // 2, 45), "B I N G O", fill="#ffffff", anchor="mm")
     draw.text((width // 2, 90), "Nora & Dominik Aktivitäten-Board", fill="#e2e8f0", anchor="mm")
-    
+
     for r in range(GRID_SIZE):
         for c in range(GRID_SIZE):
             idx = r * GRID_SIZE + c
             item = board_data.get(str(idx), {})
             is_reward = (r == 3 or c == 3)
-            
-            # Koordinaten berechnen
+
             extra_x = divider_size if c == 3 else 0
             extra_y = divider_size if r == 3 else 0
             x = 20 + c * (card_size + gap) + extra_x
             y = header_height + r * (card_size + gap) + extra_y
-            
-            # Kachel-Hintergrund
+
             tile_img = Image.new("RGB", (card_size, card_size), color="#ffffff")
-            
-            # Wenn Bild vorhanden, einpassen
+
             if item.get("image_b64"):
                 try:
                     raw_b64 = base64.b64decode(item["image_b64"])
                     loaded = Image.open(io.BytesIO(raw_b64)).convert("RGB")
                     loaded.thumbnail((card_size, card_size))
-                    # Zentriert einfügen
                     pos_x = (card_size - loaded.width) // 2
                     pos_y = (card_size - loaded.height) // 2
                     tile_img.paste(loaded, (pos_x, pos_y))
                 except Exception:
                     pass
-            
+
             tile_draw = ImageDraw.Draw(tile_img)
-            
+
             # Beschriftungsbalken unten
             tile_draw.rectangle([0, card_size - 48, card_size, card_size], fill=(255, 255, 255, 240))
             title_text = item.get("title", f"Aktivität #{idx+1}")
             if len(title_text) > 22:
                 title_text = title_text[:20] + "..."
             tile_draw.text((card_size // 2, card_size - 24), title_text, fill="#111111", anchor="mm")
-            
+
             # BINGO-Stempel zeichnen, falls erledigt
             if item.get("done"):
-                tile_draw.rectangle([35, 110, card_size - 35, 170], fill=(255, 255, 255, 230), outline="#d90429", width=4)
-                tile_draw.text((card_size // 2, 140), "B I N G O !", fill="#d90429", anchor="mm")
-            
-            # In das Hauptbild einfügen
+                tile_draw.rectangle([35, 105, card_size - 35, 175], fill=(255, 255, 255, 235), outline="#d90429", width=4)
+                tile_draw.text((card_size // 2, 132), "B I N G O !", fill="#d90429", anchor="mm")
+                if item.get("done_date"):
+                    date_short = item["done_date"].split(",")[0]
+                    tile_draw.text((card_size // 2, 156), date_short, fill="#b70928", anchor="mm")
+
             img.paste(tile_img, (x, y))
-            
-            # Grüner Rand bei Belohnungen, sonst dunkler Rand
+
             border_col = "#2ecc71" if is_reward else "#2b3d52"
             border_w = 6 if is_reward else 2
             draw.rectangle([x, y, x + card_size, y + card_size], outline=border_col, width=border_w)
-    
-    # Vertikaler Trennbalken vor Spalte 4
+
+    # Trennbalken zeichnen
     div_x = 20 + 3 * (card_size + gap) + (divider_size // 2) - 3
     draw.rectangle([div_x, header_height, div_x + 6, height - footer_height], fill="#ffffff")
-    
-    # Horizontaler Trennbalken vor Zeile 4
+
     div_y = header_height + 3 * (card_size + gap) + (divider_size // 2) - 3
     draw.rectangle([20, div_y, width - 20, div_y + 6], fill="#ffffff")
-    
+
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
 
 # ---------------------------------------------------------
-# Session State Initialisierung
+# Datenbestand initialisieren
 # ---------------------------------------------------------
-if "bingo_data" not in st.session_state:
-    st.session_state.bingo_data = load_data()
-
 data = load_data()
 st.session_state.bingo_data = data
 
@@ -218,7 +216,7 @@ st.markdown("""
         margin-bottom: 15px;
     }
 
-    /* 2. Äußere Bingo-Reihe: 4 Spalten nebeneinander erzwingen */
+    /* 2. Äußere Bingo-Reihe: 4 Spalten nebeneinander */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
@@ -228,7 +226,7 @@ st.markdown("""
         margin-bottom: 6px !important;
     }
 
-    /* 3. Spaltenbreite: Spalten 1-4 */
+    /* 3. Spaltenbreite im 4x4 Gitter */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
         width: calc(25% - 4px) !important;
@@ -240,7 +238,7 @@ st.markdown("""
         box-sizing: border-box !important;
     }
 
-    /* Vertikaler Trenner: Markante Trennlinie vor der 4. Spalte */
+    /* Vertikaler Trenner vor der 4. Spalte */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(4),
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {
         border-left: 5px solid #0b1320 !important;
@@ -282,7 +280,6 @@ st.markdown("""
         box-sizing: border-box;
     }
 
-    /* Grüner Rand für die 4. Spalte und 4. Zeile (Belohnungsfelder) */
     .green-border {
         border: 3.5px solid #2ecc71 !important;
         box-shadow: 0 0 8px rgba(46, 204, 113, 0.5) !important;
@@ -338,7 +335,7 @@ st.markdown("""
         margin-bottom: 12px;
     }
 
-    /* 6. Roter BINGO-Stempel */
+    /* 6. Roter BINGO-Stempel mit Datumsanzeige */
     .stamp-overlay {
         position: absolute;
         top: 42%;
@@ -347,21 +344,31 @@ st.markdown("""
         border: 2px solid #d90429;
         color: #d90429;
         font-family: 'Arial Black', Impact, sans-serif;
-        font-size: clamp(0.6rem, 2.8vw, 1.1rem);
+        font-size: clamp(0.6rem, 2.5vw, 1.05rem);
         font-weight: 900;
         text-transform: uppercase;
-        padding: 2px 4px;
+        padding: 2px 5px;
         border-radius: 4px;
-        background-color: rgba(255, 255, 255, 0.92);
+        background-color: rgba(255, 255, 255, 0.94);
         box-shadow: 0 0 6px rgba(217, 4, 41, 0.4);
         pointer-events: none;
         z-index: 10;
-        white-space: nowrap;
+        text-align: center;
+        line-height: 1.1;
+    }
+    .stamp-date {
+        display: block;
+        font-size: clamp(0.38rem, 1.5vw, 0.58rem);
+        font-family: Arial, sans-serif;
+        font-weight: 700;
+        letter-spacing: 0px;
+        margin-top: 1px;
+        color: #b70928;
     }
 
-    /* 7. Buttons kompakt & touchfreundlich */
-    div[data-testid="stButton"] button, 
-    div[data-testid="stPopover"] button {
+    /* 7. Grid-Buttons kompakt */
+    div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button,
+    div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] div[data-testid="stPopover"] button {
         width: 100% !important;
         min-width: 0 !important;
         padding: 0px !important;
@@ -382,6 +389,25 @@ st.markdown("""
         max-width: 90vw !important;
         z-index: 999999 !important;
     }
+
+    /* 8. Funktions-Buttons unten: sauber mehrzeilig & gut lesbar */
+    .action-btn-box div[data-testid="stButton"] button,
+    div[data-testid="stDownloadButton"] button {
+        height: auto !important;
+        min-height: 48px !important;
+        white-space: normal !important;
+        word-break: normal !important;
+        text-overflow: clip !important;
+        line-height: 1.25 !important;
+        font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        padding: 6px 4px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+        border-radius: 8px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -392,40 +418,51 @@ st.markdown("<div class='bingo-header'>B I N G O</div>", unsafe_allow_html=True)
 st.markdown("<div class='bingo-sub'>Nora & Dominik Aktivitäten-Board 😊</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Prüfung auf erreichte 3er-Reihen / Spalten (Belohnungen) & Ballons
+# Belohnungen prüfen & Smarte Ballon-Logik (nur bei NEUEN vollen Reihen)
 # ---------------------------------------------------------
-completed_rewards = []
+# Definition aller möglichen Linien: (ID, Kachel-Indizes, Name, Belohnungs-Feld Index)
+lines_to_check = [
+    ("row_0", [0, 1, 2], "Reihe 1", 3),
+    ("row_1", [4, 5, 6], "Reihe 2", 7),
+    ("row_2", [8, 9, 10], "Reihe 3", 11),
+    ("col_0", [0, 4, 8], "Spalte 1", 12),
+    ("col_1", [1, 5, 9], "Spalte 2", 13),
+    ("col_2", [2, 6, 10], "Spalte 3", 14),
+    ("diag_main", [0, 5, 10], "Diagonale", 15)
+]
 
-# Zeilen 0, 1, 2 prüfen (Aktivitäten in Spalten 0, 1, 2)
-for r in range(3):
-    if all(data[str(r * GRID_SIZE + c)].get("done", False) for c in range(3)):
-        reward_name = data[str(r * GRID_SIZE + 3)].get("title", f"Belohnung Zeile {r+1}")
-        completed_rewards.append(f"🎉 **Reihe {r+1} voll:** Ihr habt die Belohnung *'{reward_name}'* (rechts) freigeschaltet!")
+completed_banners = []
+celebrated = set(data.get("_celebrated_lines", []))
+newly_completed = []
 
-# Spalten 0, 1, 2 prüfen (Aktivitäten in Zeilen 0, 1, 2)
-for c in range(3):
-    if all(data[str(r * GRID_SIZE + c)].get("done", False) for r in range(3)):
-        reward_name = data[str(3 * GRID_SIZE + c)].get("title", f"Belohnung Spalte {c+1}")
-        completed_rewards.append(f"🌟 **Spalte {c+1} voll:** Ihr habt die Belohnung *'{reward_name}'* (unten) freigeschaltet!")
+for line_id, tile_indices, line_name, reward_idx in lines_to_check:
+    is_line_done = all(data.get(str(i), {}).get("done", False) for i in tile_indices)
+    reward_name = data.get(str(reward_idx), {}).get("title", f"Belohnung")
 
-# Diagonale 1 (0, 5, 10)
-if data["0"].get("done") and data["5"].get("done") and data["10"].get("done"):
-    diag_reward = data["15"].get("title", "Hauptbelohnung")
-    completed_rewards.append(f"👑 **Diagonale voll:** Haupt-Belohnung *'{diag_reward}'* (rechts unten) freigeschaltet!")
+    if is_line_done:
+        completed_banners.append(f"🎉 **{line_name} komplett:** Ihr habt die Belohnung *'{reward_name}'* freigeschaltet!")
+        if line_id not in celebrated:
+            newly_completed.append(line_id)
+    else:
+        # Falls ein Feld abgewählt wurde, wieder aus der Liste freigeben
+        if line_id in celebrated:
+            celebrated.remove(line_id)
 
-# Wenn neue Belohnungen vorhanden sind: Feier mit Ballons!
-if completed_rewards:
-    for msg in completed_rewards:
-        st.success(msg)
-    if "balloons_fired" not in st.session_state:
-        st.balloons()
-        st.session_state["balloons_fired"] = True
+# Wenn mindestens eine Reihe ganz NEU fertiggestellt wurde -> Feiern mit Ballons!
+if newly_completed:
+    celebrated.update(newly_completed)
+    data["_celebrated_lines"] = list(celebrated)
+    save_data(data, create_backup=False)
+    st.balloons()
+
+# Bestehende Belohnungen anzeigen
+for banner in completed_banners:
+    st.success(banner)
 
 # ---------------------------------------------------------
 # 4x4 Bingo-Gitter (3x3 Aktivitäten + 7 Belohnungen)
 # ---------------------------------------------------------
 for row in range(GRID_SIZE):
-    # Vor der 4. Zeile den horizontalen Trennbalken rendern
     if row == 3:
         st.markdown("<div class='horizontal-divider'></div>", unsafe_allow_html=True)
 
@@ -439,8 +476,13 @@ for row in range(GRID_SIZE):
         border_class = " green-border" if is_reward else ""
 
         with cols[col]:
-            # Stempel erzeugen, wenn erledigt
-            stamp_html = "<div class='stamp-overlay'>BINGO!</div>" if item.get("done", False) else ""
+            # Stempel erzeugen (mit Datumsstempel)
+            if item.get("done", False):
+                date_label = item.get("done_date", "")
+                date_html = f"<span class='stamp-date'>{date_label.split(',')[0]}</span>" if date_label else ""
+                stamp_html = f"<div class='stamp-overlay'>BINGO!{date_html}</div>"
+            else:
+                stamp_html = ""
 
             # Titel ermitteln
             default_label = f"🎁 Belohnung" if is_reward else f"Aktivität #{idx+1}"
@@ -458,19 +500,21 @@ for row in range(GRID_SIZE):
                 icon = "🎁" if is_reward else "📷"
                 content_html = f"<div class='placeholder-box'>{icon}</div>"
 
-            # Kachel rendern
             card_html = f"<div class='bingo-card{border_class}'>{content_html}{title_html}{stamp_html}</div>"
             st.markdown(card_html, unsafe_allow_html=True)
 
-            # Zwei Buttons nebeneinander: 🎯 zum Abhaken, ✏️ zum Bearbeiten
+            # Buttons: 🎯 Erledigen & ✏️ Bearbeiten
             btn1, btn2 = st.columns(2)
             with btn1:
                 btn_symbol = "↩️" if item.get("done") else "🎯"
                 if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help="Erledigt / Stempel"):
-                    data[k]["done"] = not data[k].get("done", False)
-                    # Wenn abgehakt, Ballons freischalten
-                    if data[k]["done"]:
-                        st.session_state.pop("balloons_fired", None)
+                    is_now_done = not item.get("done", False)
+                    data[k]["done"] = is_now_done
+                    if is_now_done:
+                        now_str = datetime.datetime.now().strftime("%d.%m.%Y, %H:%M Uhr")
+                        data[k]["done_date"] = now_str
+                    else:
+                        data[k]["done_date"] = None
                     save_data(data)
                     st.rerun()
 
@@ -479,6 +523,9 @@ for row in range(GRID_SIZE):
                 with st.popover("✏️", use_container_width=True, help=pop_help):
                     field_type = "🎁 Belohnung" if is_reward else "Aktivität"
                     st.markdown(f"**{field_type} #{idx+1} anpassen**")
+                    if item.get("done") and item.get("done_date"):
+                        st.caption(f"✅ Erledigt am: **{item['done_date']}**")
+
                     new_title = st.text_input("Name", value=item.get("title", ""), key=f"t_{idx}")
                     new_desc = st.text_input("Notiz (optional)", value=item.get("description", ""), key=f"d_{idx}")
                     uploaded_file = st.file_uploader("Foto / Screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
@@ -499,13 +546,13 @@ for row in range(GRID_SIZE):
 st.write("---")
 
 # ---------------------------------------------------------
-# Feature: 🎲 Zufalls-Date-Picker ("Was machen wir heute?")
+# Feature-Bereich: Zufalls-Date & Bild-Export
 # ---------------------------------------------------------
 col_dice, col_export = st.columns(2)
 
 with col_dice:
+    st.markdown("<div class='action-btn-box'>", unsafe_allow_html=True)
     if st.button("🎲 Was machen wir heute?", use_container_width=True, help="Wählt per Zufall eine offene Aktivität aus"):
-        # Nur Aktivitäten aus dem 3x3 Bereich (Zeile 0-2, Spalte 0-2), die noch nicht erledigt sind
         open_activities = []
         for r in range(3):
             for c in range(3):
@@ -513,15 +560,13 @@ with col_dice:
                 if not data[str(idx)].get("done", False):
                     act_title = data[str(idx)].get("title", f"Aktivität #{idx+1}")
                     open_activities.append(act_title)
-        
+
         if open_activities:
             chosen = random.choice(open_activities)
             st.session_state["picked_date"] = chosen
         else:
-            st.session_state["picked_date"] = "🎉 Alle 9 Aktivitäten sind bereits erledigt! Zeit für die Belohnungen!"
-
-if "picked_date" in st.session_state:
-    st.info(f"✨ **Vorschlag für euer Date:** {st.session_state['picked_date']}")
+            st.session_state["picked_date"] = "🎉 Alle 9 Aktivitäten sind erledigt! Zeit für Belohnungen!"
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col_export:
     board_bytes = generate_board_image(data)
@@ -531,13 +576,16 @@ with col_export:
         file_name="Nora_und_Dominik_Bingo_Board.png",
         mime="image/png",
         use_container_width=True,
-        help="Speichert das komplette Board als hochauflösendes Bild auf eurem Smartphone/PC"
+        help="Speichert das Board als hochauflösendes Bild auf dem Smartphone"
     )
+
+if "picked_date" in st.session_state:
+    st.info(f"✨ **Vorschlag für euer nächstes Date:** {st.session_state['picked_date']}")
 
 # ---------------------------------------------------------
 # Fortschritt & Optionen mit Speicherpunkten
 # ---------------------------------------------------------
-done_count = sum(1 for v in data.values() if v.get("done"))
+done_count = sum(1 for v in data.values() if isinstance(v, dict) and v.get("done"))
 st.info(f"🏆 Fortschritt: **{done_count} von {TOTAL_TILES}** Feldern erledigt!")
 
 with st.expander("⚙️ Optionen & Speicherpunkte"):
@@ -545,7 +593,6 @@ with st.expander("⚙️ Optionen & Speicherpunkte"):
     history = load_history()
 
     if history:
-        # Letzte 3 Sicherungspunkte (neuester zuerst)
         options = {
             f"Punkt {len(history) - i}: {item['timestamp']}": item["data"]
             for i, item in enumerate(reversed(history))
@@ -579,7 +626,10 @@ with st.expander("⚙️ Optionen & Speicherpunkte"):
     if st.button("Alle Bingo-Stempel entfernen", use_container_width=True):
         save_backup(data)
         for k in data:
-            data[k]["done"] = False
+            if isinstance(data[k], dict):
+                data[k]["done"] = False
+                data[k]["done_date"] = None
+        data["_celebrated_lines"] = []
         save_data(data, create_backup=True)
         st.success("Alle Stempel wurden zurückgesetzt (vorheriger Stand wurde gesichert)!")
         st.rerun()
