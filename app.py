@@ -4,6 +4,7 @@ import os
 import base64
 from PIL import Image
 import io
+import datetime
 
 # ---------------------------------------------------------
 # Seitenkonfiguration: Schlankes Layout
@@ -16,11 +17,12 @@ st.set_page_config(
 )
 
 DATA_FILE = "bingo_data.json"
+HISTORY_FILE = "bingo_history.json"
 GRID_SIZE = 4  # 4x4 = 16 Felder (3x3 Aktivitäten + 7 Belohnungen)
 TOTAL_TILES = GRID_SIZE * GRID_SIZE
 
 # ---------------------------------------------------------
-# Daten laden & speichern
+# Daten laden, speichern & automatische Speicherpunkte
 # ---------------------------------------------------------
 def get_default_data():
     defaults = {}
@@ -59,9 +61,37 @@ def load_data():
             return get_default_data()
     return get_default_data()
 
-def save_data(data):
+def load_history():
+    """Lädt die Liste der gespeicherten Sicherungspunkte"""
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_backup(data_snapshot):
+    """Speichert einen neuen Sicherungspunkt und behält nur die letzten 3"""
+    history = load_history()
+    now_str = datetime.datetime.now().strftime("%d.%m.%Y um %H:%M:%S Uhr")
+    history.append({
+        "timestamp": now_str,
+        "data": data_snapshot
+    })
+    # Nur die neuesten 3 Speicherpunkte behalten
+    history = history[-3:]
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def save_data(data, create_backup=True):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    if create_backup:
+        save_backup(data)
 
 if "bingo_data" not in st.session_state:
     st.session_state.bingo_data = load_data()
@@ -375,14 +405,53 @@ for row in range(GRID_SIZE):
 st.write("---")
 
 # ---------------------------------------------------------
-# Fortschritt & Optionen
+# Fortschritt & Optionen mit Speicherpunkten
 # ---------------------------------------------------------
 done_count = sum(1 for v in data.values() if v.get("done"))
 st.info(f"🏆 Fortschritt: **{done_count} von {TOTAL_TILES}** Feldern erledigt!")
 
-with st.expander("⚙️ Optionen"):
-    if st.button("🔄 Alle Bingo-Stempel zurücksetzen"):
+with st.expander("⚙️ Optionen & Speicherpunkte"):
+    st.markdown("### 💾 Speicherpunkte wiederherstellen")
+    history = load_history()
+    
+    if history:
+        # Letzte 3 Sicherungspunkte (neuester zuerst)
+        options = {
+            f"Punkt {len(history) - i}: {item['timestamp']}": item["data"]
+            for i, item in enumerate(reversed(history))
+        }
+        selected_label = st.selectbox(
+            "Wähle einen der letzten 3 Speicherpunkte zum Laden:",
+            options=list(options.keys()),
+            key="history_selector"
+        )
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("📥 Stand wiederherstellen", type="primary", use_container_width=True):
+                restored_data = options[selected_label]
+                # Wiederherstellen ohne sofort neues History-Element anzulegen
+                save_data(restored_data, create_backup=False)
+                st.success(f"{selected_label} erfolgreich wiederhergestellt!")
+                st.rerun()
+        with c2:
+            if st.button("💾 Jetzt manuell sichern", use_container_width=True):
+                save_backup(data)
+                st.success("Aktueller Stand als neuer Speicherpunkt gesichert!")
+                st.rerun()
+    else:
+        st.write("Noch keine automatischen Speicherpunkte vorhanden.")
+        if st.button("💾 Jetzt ersten Speicherpunkt anlegen", use_container_width=True):
+            save_backup(data)
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 🔄 Board zurücksetzen")
+    if st.button("Alle Bingo-Stempel entfernen", use_container_width=True):
+        # Vor dem Zurücksetzen aktuellen Stand automatisch als Backup abspeichern!
+        save_backup(data)
         for k in data:
             data[k]["done"] = False
-        save_data(data)
+        save_data(data, create_backup=True)
+        st.success("Alle Stempel wurden zurückgesetzt (vorheriger Stand wurde gesichert)!")
         st.rerun()
