@@ -58,7 +58,7 @@ data = load_data()
 st.session_state.bingo_data = data
 
 # ---------------------------------------------------------
-# CSS: Garantiert echtes 4x4-Gitter auf Mobilgeräten
+# CSS: Echtes 4x4-Gitter, Abstände & Grüner Rand
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -66,8 +66,8 @@ st.markdown("""
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 2rem !important;
-        padding-left: 0.4rem !important;
-        padding-right: 0.4rem !important;
+        padding-left: 0.3rem !important;
+        padding-right: 0.3rem !important;
         max-width: 100% !important;
     }
 
@@ -98,15 +98,21 @@ st.markdown("""
         margin-bottom: 6px !important;
     }
 
-    /* 3. Jede der 4 Kacheln bekommt exakt 25% Breite (auch auf dem Handy!) */
+    /* 3. Spaltenbreite: Spalten 1-3 ca. 24%, Spalte 4 hat etwas Abstand */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
-        width: calc(25% - 3px) !important;
+        width: calc(25% - 4px) !important;
         min-width: 0 !important;
-        max-width: calc(25% - 3px) !important;
-        flex: 1 1 25% !important;
+        max-width: calc(25% - 4px) !important;
+        flex: 1 1 calc(25% - 4px) !important;
         padding: 0 !important;
         margin: 0 !important;
+    }
+
+    /* Extra Abstand für die ganz rechte 4. Spalte */
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(4),
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {
+        margin-left: 6px !important;
     }
 
     /* 4. Die beiden Buttons unter jeder Kachel: je genau 50% */
@@ -121,6 +127,7 @@ st.markdown("""
         min-width: 0 !important;
         max-width: 50% !important;
         flex: 1 1 50% !important;
+        margin-left: 0 !important;
     }
 
     /* 5. Quadratische Bildkarte (1:1 Ratio) */
@@ -133,30 +140,69 @@ st.markdown("""
         overflow: hidden;
         background-color: #f8f9fa;
         display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
         align-items: center;
-        justify-content: center;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        box-sizing: border-box;
+    }
+
+    /* Grüner Rand für die 4. Spalte und 4. Zeile */
+    .green-border {
+        border: 3.5px solid #2ecc71 !important;
+        box-shadow: 0 0 7px rgba(46, 204, 113, 0.4) !important;
     }
 
     .bingo-card img {
+        position: absolute;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
         object-fit: cover;
         display: block;
+        z-index: 1;
     }
 
     .placeholder-box {
+        position: absolute;
+        top: 20%;
+        width: 100%;
         text-align: center;
         color: #777;
-        font-size: clamp(0.55rem, 2vw, 0.75rem);
-        padding: 2px;
+        font-size: clamp(0.7rem, 2.5vw, 0.95rem);
         line-height: 1.2;
+        z-index: 1;
+    }
+
+    /* Beschriftungs-Balken für den Aktivitätsnamen */
+    .card-title-bar {
+        position: relative;
+        z-index: 2;
+        width: 100%;
+        background: rgba(255, 255, 255, 0.92);
+        color: #111;
+        font-size: clamp(0.52rem, 1.8vw, 0.72rem);
+        font-weight: 700;
+        text-align: center;
+        padding: 3px 2px;
+        line-height: 1.15;
+        border-top: 1px solid rgba(0,0,0,0.1);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Trennbalken vor der 4. Zeile */
+    .row-separator {
+        width: 100%;
+        height: 10px;
     }
 
     /* 6. Roter BINGO-Stempel */
     .stamp-overlay {
         position: absolute;
-        top: 50%;
+        top: 42%;
         left: 50%;
         transform: translate(-50%, -50%) rotate(-18deg);
         border: 2px solid #d90429;
@@ -167,7 +213,7 @@ st.markdown("""
         text-transform: uppercase;
         padding: 2px 4px;
         border-radius: 4px;
-        background-color: rgba(255, 255, 255, 0.9);
+        background-color: rgba(255, 255, 255, 0.92);
         box-shadow: 0 0 6px rgba(217, 4, 41, 0.4);
         pointer-events: none;
         z-index: 10;
@@ -212,26 +258,40 @@ st.markdown("<div class='bingo-sub'>Unser gemeinsames Aktivitäten-Board 💕</d
 # 4x4 Bingo-Gitter
 # ---------------------------------------------------------
 for row in range(GRID_SIZE):
+    # Vor der letzten (4.) Zeile einen visuellen Abstandsbalken einfügen
+    if row == 3:
+        st.markdown("<div class='row-separator'></div>", unsafe_allow_html=True)
+
     cols = st.columns(GRID_SIZE)
     for col in range(GRID_SIZE):
         idx = row * GRID_SIZE + col
         k = str(idx)
         item = data[k]
 
+        # Prüfen, ob das Feld zur 4. Zeile (row == 3) oder 4. Spalte (col == 3) gehört
+        is_green_border = (row == 3 or col == 3)
+        border_class = " green-border" if is_green_border else ""
+
         with cols[col]:
             # Stempel erzeugen, wenn erledigt
             stamp_html = "<div class='stamp-overlay'>BINGO!</div>" if item.get("done", False) else ""
 
-            # Nur das Bild (oder sauberer Platzhalter)
+            # Titel der Aktivität ermitteln
+            activity_title = item.get("title", f"Aktivität #{idx+1}").strip()
+            if not activity_title:
+                activity_title = f"Aktivität #{idx+1}"
+
+            title_html = f"<div class='card-title-bar' title='{activity_title}'>{activity_title}</div>"
+
+            # Bild oder Platzhalter laden
             if item.get("image_b64"):
                 img_src = f"data:image/jpeg;base64,{item['image_b64']}"
-                content_html = f"<img src='{img_src}' alt='Feld {idx+1}'>"
+                content_html = f"<img src='{img_src}' alt='{activity_title}'>"
             else:
-                title_preview = item.get("title", f"#{idx+1}")[:8]
-                content_html = f"<div class='placeholder-box'>📷<br><b>{title_preview}</b></div>"
+                content_html = "<div class='placeholder-box'>📷</div>"
 
-            # Kachel rendern
-            card_html = f"<div class='bingo-card'>{content_html}{stamp_html}</div>"
+            # Kachel rendern (Bild/Platzhalter + Titelbar + optionaler Stempel)
+            card_html = f"<div class='bingo-card{border_class}'>{content_html}{title_html}{stamp_html}</div>"
             st.markdown(card_html, unsafe_allow_html=True)
 
             # Zwei Buttons nebeneinander: 🎯 zum Abhaken, ✏️ zum Bearbeiten
