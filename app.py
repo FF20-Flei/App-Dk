@@ -6,6 +6,8 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 import datetime
 import random
+import urllib.request
+import urllib.error
 
 # ---------------------------------------------------------
 # Seitenkonfiguration: Schlankes Layout
@@ -23,8 +25,6 @@ GRID_SIZE = 4  # 4x4 = 16 Felder (3x3 Aktivitäten + 7 Belohnungen)
 TOTAL_TILES = GRID_SIZE * GRID_SIZE
 
 # Zuordnung: Welche 3er-Linie schaltet welche Belohnung frei?
-# Key: Index der Belohnung (3, 7, 11, 12, 13, 14, 15)
-# Value: (Linien-ID, Liste von Kachel-Indizes, Name der Anforderung)
 REWARD_REQUIREMENTS = {
     3: ("row_0", [0, 1, 2], "Reihe 1 (oben)"),
     7: ("row_1", [4, 5, 6], "Reihe 2 (mitte)"),
@@ -36,7 +36,53 @@ REWARD_REQUIREMENTS = {
 }
 
 # ---------------------------------------------------------
-# Daten laden, speichern & automatische Speicherpunkte
+# GitHub Gist Cloud-Sync (Dauerhafte Speicherung trotz Standby)
+# ---------------------------------------------------------
+def get_gist_config():
+    token = st.secrets.get("GITHUB_TOKEN", None)
+    gist_id = st.secrets.get("GIST_ID", None)
+    return token, gist_id
+
+def load_data_from_gist(token, gist_id):
+    try:
+        url = f"https://api.github.com/gists/{gist_id}"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("User-Agent", "Streamlit-Bingo-App")
+        with urllib.request.urlopen(req, timeout=6) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            files = payload.get("files", {})
+            if "bingo_data.json" in files:
+                content = files["bingo_data.json"]["content"]
+                return json.loads(content)
+    except Exception:
+        pass
+    return None
+
+def save_data_to_gist(token, gist_id, data_dict):
+    try:
+        url = f"https://api.github.com/gists/{gist_id}"
+        content_str = json.dumps(data_dict, ensure_ascii=False, indent=2)
+        body = json.dumps({
+            "files": {
+                "bingo_data.json": {
+                    "content": content_str
+                }
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="PATCH")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", "Streamlit-Bingo-App")
+        with urllib.request.urlopen(req, timeout=6) as response:
+            return response.status in (200, 201)
+    except Exception:
+        return False
+
+# ---------------------------------------------------------
+# Lokale & automatische Speicher-Verwaltung
 # ---------------------------------------------------------
 def get_default_data():
     defaults = {}
@@ -55,29 +101,39 @@ def get_default_data():
     defaults["_celebrated_lines"] = []
     return defaults
 
+def ensure_complete_data(data):
+    if not isinstance(data, dict):
+        return get_default_data()
+    for i in range(TOTAL_TILES):
+        k = str(i)
+        if k not in data:
+            r = i // GRID_SIZE
+            c = i % GRID_SIZE
+            is_reward = (r == 3 or c == 3)
+            data[k] = {
+                "title": "🎁 Belohnung" if is_reward else f"Aktivität #{i+1}",
+                "description": "",
+                "image_b64": None,
+                "done": False,
+                "done_date": None
+            }
+        elif "done_date" not in data[k]:
+            data[k]["done_date"] = None
+    if "_celebrated_lines" not in data:
+        data["_celebrated_lines"] = []
+    return data
+
 def load_data():
+    token, gist_id = get_gist_config()
+    if token and gist_id:
+        remote_data = load_data_from_gist(token, gist_id)
+        if remote_data:
+            return ensure_complete_data(remote_data)
+
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for i in range(TOTAL_TILES):
-                    k = str(i)
-                    if k not in data:
-                        r = i // GRID_SIZE
-                        c = i % GRID_SIZE
-                        is_reward = (r == 3 or c == 3)
-                        data[k] = {
-                            "title": "🎁 Belohnung" if is_reward else f"Aktivität #{i+1}",
-                            "description": "",
-                            "image_b64": None,
-                            "done": False,
-                            "done_date": None
-                        }
-                    elif "done_date" not in data[k]:
-                        data[k]["done_date"] = None
-                if "_celebrated_lines" not in data:
-                    data["_celebrated_lines"] = []
-                return data
+                return ensure_complete_data(json.load(f))
         except Exception:
             return get_default_data()
     return get_default_data()
@@ -106,8 +162,16 @@ def save_backup(data_snapshot):
         pass
 
 def save_data(data, create_backup=True):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    token, gist_id = get_gist_config()
+    if token and gist_id:
+        save_data_to_gist(token, gist_id, data)
+
     if create_backup:
         save_backup(data)
 
@@ -136,7 +200,6 @@ def generate_board_image(board_data):
     img = Image.new("RGB", (width, height), color="#0b1320")
     draw = ImageDraw.Draw(img)
 
-    # Titel zeichnen
     draw.text((width // 2, 45), "B I N G O", fill="#ffffff", anchor="mm")
     draw.text((width // 2, 90), "Nora & Dominik Aktivitäten-Board", fill="#e2e8f0", anchor="mm")
 
@@ -155,7 +218,6 @@ def generate_board_image(board_data):
             tile_img = Image.new("RGB", (card_size, card_size), color="#ffffff")
 
             if is_reward and not unlocked:
-                # Gesperrte Belohnung im Bild
                 tile_draw = ImageDraw.Draw(tile_img)
                 tile_draw.rectangle([0, 0, card_size, card_size], fill="#1e293b")
                 tile_draw.text((card_size // 2, card_size // 2 - 20), "🔒", fill="#94a3b8", anchor="mm")
@@ -208,7 +270,7 @@ data = load_data()
 st.session_state.bingo_data = data
 
 # ---------------------------------------------------------
-# CSS: Responsives 4x4-Layout, Sperr-Overlay & Stile
+# CSS: Responsives 4x4-Layout & Stile
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -301,7 +363,6 @@ st.markdown("""
         box-shadow: 0 0 8px rgba(46, 204, 113, 0.5) !important;
     }
 
-    /* Gesperrte Kachel */
     .card-locked {
         background-color: #1e293b !important;
         border: 3.5px dashed #64748b !important;
@@ -453,7 +514,6 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Legenden-Box */
     .legend-card {
         background-color: #1e293b;
         border: 1px solid #334155;
@@ -498,7 +558,7 @@ st.markdown("<div class='bingo-header'>B I N G O</div>", unsafe_allow_html=True)
 st.markdown("<div class='bingo-sub'>Nora & Dominik Aktivitäten-Board 😊</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Belohnungen prüfen & Smarte Ballon-Logik (nur bei NEUEN vollen Reihen)
+# Belohnungen prüfen & Smarte Ballon-Logik
 # ---------------------------------------------------------
 completed_banners = []
 celebrated = set(data.get("_celebrated_lines", []))
@@ -543,7 +603,6 @@ for row in range(GRID_SIZE):
 
         with cols[col]:
             if is_reward and not unlocked:
-                # GESPERRTE BELOHNUNG: Maskiert mit Schloss
                 req_info = REWARD_REQUIREMENTS[idx][2]
                 card_html = f"""
                 <div class='bingo-card card-locked' title='Gesperrt: Erledigt erst {req_info}!'>
@@ -555,7 +614,6 @@ for row in range(GRID_SIZE):
                 """
                 st.markdown(card_html, unsafe_allow_html=True)
 
-                # Bei gesperrten Feldern: Buttons passend sperren / nur Popover für Konfiguration
                 btn1, btn2 = st.columns(2)
                 with btn1:
                     st.button("🔒", key=f"locked_{idx}", disabled=True, use_container_width=True, help=f"Gesperrt! Benötigt: {req_info}")
@@ -582,7 +640,6 @@ for row in range(GRID_SIZE):
                             st.rerun()
 
             else:
-                # OFFENES FELD (Aktivität ODER freigeschaltete Belohnung)
                 border_class = " green-border" if is_reward else ""
 
                 if item.get("done", False):
@@ -689,46 +746,60 @@ if "picked_date" in st.session_state:
     st.info(f"✨ **Vorschlag für euer nächstes Date:** {st.session_state['picked_date']}")
 
 # ---------------------------------------------------------
-# Fortschritt & Optionen mit Speicherpunkten
+# Fortschritt & Optionen mit Datensicherung
 # ---------------------------------------------------------
 done_count = sum(1 for v in data.values() if isinstance(v, dict) and v.get("done"))
 st.info(f"🏆 Fortschritt: **{done_count} von {TOTAL_TILES}** Feldern erledigt!")
 
-with st.expander("⚙️ Optionen & Speicherpunkte"):
-    st.markdown("### 💾 Speicherpunkte wiederherstellen")
-    history = load_history()
+with st.expander("⚙️ Optionen & Datensicherung"):
+    st.markdown("### 💾 Datensicherung & Stand übertragen")
+    st.caption("Lade den aktuellen Stand auf dein Handy/PC herunter, damit er niemals verloren geht:")
 
+    backup_json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    st.download_button(
+        label="💾 Alle Daten als Datei sichern (.json)",
+        data=backup_json_bytes,
+        file_name="bingo_daten_backup.json",
+        mime="application/json",
+        use_container_width=True,
+        help="Speichert den kompletten Stand (inkl. aller Bilder und Bingos) auf deinem Gerät"
+    )
+
+    st.markdown("---")
+    st.markdown("### 📂 Gesicherten Stand wiederherstellen")
+    restore_file = st.file_uploader("Backup-Datei (.json) hier hochladen:", type=["json"], key="restore_uploader")
+    if restore_file is not None:
+        if st.button("Stand aus Datei laden", type="primary", use_container_width=True):
+            try:
+                uploaded_content = json.load(restore_file)
+                valid_data = ensure_complete_data(uploaded_content)
+                save_data(valid_data, create_backup=True)
+                st.success("Stand erfolgreich wiederhergestellt!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Fehler beim Laden der Datei: {e}")
+
+    st.markdown("---")
+    st.markdown("### 🔄 Letzte Sitzungs-Speicherpunkte")
+    history = load_history()
     if history:
         options = {
-            f"Punkt {len(history) - i}: {item['timestamp']}": item["data"]
+            f"Punkt {len(history) - i}: {item['timestamp']}": item['data']
             for i, item in enumerate(reversed(history))
         }
         selected_label = st.selectbox(
-            "Wähle einen der letzten 3 Speicherpunkte zum Laden:",
+            "Wähle einen der letzten 3 automatischen Speicherpunkte:",
             options=list(options.keys()),
             key="history_selector"
         )
-
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("📥 Stand wiederherstellen", type="primary", use_container_width=True):
-                restored_data = options[selected_label]
-                save_data(restored_data, create_backup=False)
-                st.success(f"{selected_label} erfolgreich wiederhergestellt!")
-                st.rerun()
-        with c2:
-            if st.button("💾 Jetzt manuell sichern", use_container_width=True):
-                save_backup(data)
-                st.success("Aktueller Stand als neuer Speicherpunkt gesichert!")
-                st.rerun()
-    else:
-        st.write("Noch keine automatischen Speicherpunkte vorhanden.")
-        if st.button("💾 Jetzt ersten Speicherpunkt anlegen", use_container_width=True):
-            save_backup(data)
+        if st.button("📥 Diesen Stand laden", use_container_width=True):
+            restored_data = options[selected_label]
+            save_data(restored_data, create_backup=False)
+            st.success("Speicherpunkt geladen!")
             st.rerun()
 
     st.markdown("---")
-    st.markdown("### 🔄 Board zurücksetzen")
+    st.markdown("### ⚠️ Board zurücksetzen")
     if st.button("Alle Bingo-Stempel entfernen", use_container_width=True):
         save_backup(data)
         for k in data:
@@ -737,11 +808,11 @@ with st.expander("⚙️ Optionen & Speicherpunkte"):
                 data[k]["done_date"] = None
         data["_celebrated_lines"] = []
         save_data(data, create_backup=True)
-        st.success("Alle Stempel wurden zurückgesetzt (vorheriger Stand wurde gesichert)!")
+        st.success("Alle Stempel wurden zurückgesetzt!")
         st.rerun()
 
 # ---------------------------------------------------------
-# 📖 Symbol-Legende ganz unten
+# 📖 Symbol-Legende
 # ---------------------------------------------------------
 st.markdown("""
 <div class='legend-card'>
