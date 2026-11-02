@@ -22,6 +22,19 @@ HISTORY_FILE = "bingo_history.json"
 GRID_SIZE = 4  # 4x4 = 16 Felder (3x3 Aktivitäten + 7 Belohnungen)
 TOTAL_TILES = GRID_SIZE * GRID_SIZE
 
+# Zuordnung: Welche 3er-Linie schaltet welche Belohnung frei?
+# Key: Index der Belohnung (3, 7, 11, 12, 13, 14, 15)
+# Value: (Linien-ID, Liste von Kachel-Indizes, Name der Anforderung)
+REWARD_REQUIREMENTS = {
+    3: ("row_0", [0, 1, 2], "Reihe 1 (oben)"),
+    7: ("row_1", [4, 5, 6], "Reihe 2 (mitte)"),
+    11: ("row_2", [8, 9, 10], "Reihe 3 (unten)"),
+    12: ("col_0", [0, 4, 8], "Spalte 1 (links)"),
+    13: ("col_1", [1, 5, 9], "Spalte 2 (mitte)"),
+    14: ("col_2", [2, 6, 10], "Spalte 3 (rechts)"),
+    15: ("diag_main", [0, 5, 10], "Diagonale (oben links nach unten)")
+}
+
 # ---------------------------------------------------------
 # Daten laden, speichern & automatische Speicherpunkte
 # ---------------------------------------------------------
@@ -31,7 +44,7 @@ def get_default_data():
         for c in range(GRID_SIZE):
             idx = r * GRID_SIZE + c
             is_reward = (r == 3 or c == 3)
-            default_title = f"🎁 Belohnung #{idx+1}" if is_reward else f"Aktivität #{idx+1}"
+            default_title = f"🎁 Belohnung" if is_reward else f"Aktivität #{idx+1}"
             defaults[str(idx)] = {
                 "title": default_title,
                 "description": "",
@@ -54,7 +67,7 @@ def load_data():
                         c = i % GRID_SIZE
                         is_reward = (r == 3 or c == 3)
                         data[k] = {
-                            "title": f"🎁 Belohnung" if is_reward else f"Aktivität #{i+1}",
+                            "title": "🎁 Belohnung" if is_reward else f"Aktivität #{i+1}",
                             "description": "",
                             "image_b64": None,
                             "done": False,
@@ -70,7 +83,6 @@ def load_data():
     return get_default_data()
 
 def load_history():
-    """Lädt die Liste der gespeicherten Sicherungspunkte"""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
@@ -80,7 +92,6 @@ def load_history():
     return []
 
 def save_backup(data_snapshot):
-    """Speichert einen neuen Sicherungspunkt und behält nur die letzten 3"""
     history = load_history()
     now_str = datetime.datetime.now().strftime("%d.%m.%Y um %H:%M:%S Uhr")
     history.append({
@@ -99,6 +110,15 @@ def save_data(data, create_backup=True):
         json.dump(data, f, ensure_ascii=False, indent=2)
     if create_backup:
         save_backup(data)
+
+# ---------------------------------------------------------
+# Hilfsfunktion: Prüfen, ob Belohnung freigeschaltet ist
+# ---------------------------------------------------------
+def is_reward_unlocked(idx, board_data):
+    if idx not in REWARD_REQUIREMENTS:
+        return True
+    _, req_indices, _ = REWARD_REQUIREMENTS[idx]
+    return all(board_data.get(str(i), {}).get("done", False) for i in req_indices)
 
 # ---------------------------------------------------------
 # Export-Funktion: Komplettes Board als Bild generieren
@@ -125,6 +145,7 @@ def generate_board_image(board_data):
             idx = r * GRID_SIZE + c
             item = board_data.get(str(idx), {})
             is_reward = (r == 3 or c == 3)
+            unlocked = is_reward_unlocked(idx, board_data) if is_reward else True
 
             extra_x = divider_size if c == 3 else 0
             extra_y = divider_size if r == 3 else 0
@@ -133,41 +154,43 @@ def generate_board_image(board_data):
 
             tile_img = Image.new("RGB", (card_size, card_size), color="#ffffff")
 
-            if item.get("image_b64"):
-                try:
-                    raw_b64 = base64.b64decode(item["image_b64"])
-                    loaded = Image.open(io.BytesIO(raw_b64)).convert("RGB")
-                    loaded.thumbnail((card_size, card_size))
-                    pos_x = (card_size - loaded.width) // 2
-                    pos_y = (card_size - loaded.height) // 2
-                    tile_img.paste(loaded, (pos_x, pos_y))
-                except Exception:
-                    pass
+            if is_reward and not unlocked:
+                # Gesperrte Belohnung im Bild
+                tile_draw = ImageDraw.Draw(tile_img)
+                tile_draw.rectangle([0, 0, card_size, card_size], fill="#1e293b")
+                tile_draw.text((card_size // 2, card_size // 2 - 20), "🔒", fill="#94a3b8", anchor="mm")
+                tile_draw.text((card_size // 2, card_size // 2 + 25), "Gesperrt", fill="#e2e8f0", anchor="mm")
+            else:
+                if item.get("image_b64"):
+                    try:
+                        raw_b64 = base64.b64decode(item["image_b64"])
+                        loaded = Image.open(io.BytesIO(raw_b64)).convert("RGB")
+                        loaded.thumbnail((card_size, card_size))
+                        pos_x = (card_size - loaded.width) // 2
+                        pos_y = (card_size - loaded.height) // 2
+                        tile_img.paste(loaded, (pos_x, pos_y))
+                    except Exception:
+                        pass
 
-            tile_draw = ImageDraw.Draw(tile_img)
+                tile_draw = ImageDraw.Draw(tile_img)
+                tile_draw.rectangle([0, card_size - 48, card_size, card_size], fill=(255, 255, 255, 240))
+                title_text = item.get("title", f"Aktivität #{idx+1}")
+                if len(title_text) > 22:
+                    title_text = title_text[:20] + "..."
+                tile_draw.text((card_size // 2, card_size - 24), title_text, fill="#111111", anchor="mm")
 
-            # Beschriftungsbalken unten
-            tile_draw.rectangle([0, card_size - 48, card_size, card_size], fill=(255, 255, 255, 240))
-            title_text = item.get("title", f"Aktivität #{idx+1}")
-            if len(title_text) > 22:
-                title_text = title_text[:20] + "..."
-            tile_draw.text((card_size // 2, card_size - 24), title_text, fill="#111111", anchor="mm")
-
-            # BINGO-Stempel zeichnen, falls erledigt
-            if item.get("done"):
-                tile_draw.rectangle([35, 105, card_size - 35, 175], fill=(255, 255, 255, 235), outline="#d90429", width=4)
-                tile_draw.text((card_size // 2, 132), "B I N G O !", fill="#d90429", anchor="mm")
-                if item.get("done_date"):
-                    date_short = item["done_date"].split(",")[0]
-                    tile_draw.text((card_size // 2, 156), date_short, fill="#b70928", anchor="mm")
+                if item.get("done"):
+                    tile_draw.rectangle([35, 105, card_size - 35, 175], fill=(255, 255, 255, 235), outline="#d90429", width=4)
+                    tile_draw.text((card_size // 2, 132), "B I N G O !", fill="#d90429", anchor="mm")
+                    if item.get("done_date"):
+                        date_short = item["done_date"].split(",")[0]
+                        tile_draw.text((card_size // 2, 156), date_short, fill="#b70928", anchor="mm")
 
             img.paste(tile_img, (x, y))
-
             border_col = "#2ecc71" if is_reward else "#2b3d52"
             border_w = 6 if is_reward else 2
             draw.rectangle([x, y, x + card_size, y + card_size], outline=border_col, width=border_w)
 
-    # Trennbalken zeichnen
     div_x = 20 + 3 * (card_size + gap) + (divider_size // 2) - 3
     draw.rectangle([div_x, header_height, div_x + 6, height - footer_height], fill="#ffffff")
 
@@ -185,11 +208,10 @@ data = load_data()
 st.session_state.bingo_data = data
 
 # ---------------------------------------------------------
-# CSS: Responsives 4x4-Layout, Trenner & Stempel
+# CSS: Responsives 4x4-Layout, Sperr-Overlay & Stile
 # ---------------------------------------------------------
 st.markdown("""
 <style>
-    /* 1. Haupt-Container auf Handys maximal ausnutzen */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 2rem !important;
@@ -198,7 +220,6 @@ st.markdown("""
         max-width: 100% !important;
     }
 
-    /* Titel-Styling */
     .bingo-header {
         text-align: center;
         font-family: 'Arial Black', Impact, sans-serif;
@@ -216,7 +237,6 @@ st.markdown("""
         margin-bottom: 15px;
     }
 
-    /* 2. Äußere Bingo-Reihe: 4 Spalten nebeneinander */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
@@ -226,7 +246,6 @@ st.markdown("""
         margin-bottom: 6px !important;
     }
 
-    /* 3. Spaltenbreite im 4x4 Gitter */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
         width: calc(25% - 4px) !important;
@@ -238,7 +257,6 @@ st.markdown("""
         box-sizing: border-box !important;
     }
 
-    /* Vertikaler Trenner vor der 4. Spalte */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(4),
     div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {
         border-left: 5px solid #0b1320 !important;
@@ -246,7 +264,6 @@ st.markdown("""
         margin-left: 3px !important;
     }
 
-    /* 4. Die beiden Buttons unter jeder Kachel: je genau 50% */
     div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] {
         gap: 2px !important;
         margin-bottom: 0 !important;
@@ -263,7 +280,6 @@ st.markdown("""
         padding-left: 0 !important;
     }
 
-    /* 5. Quadratische Bildkarte (1:1 Ratio) */
     .bingo-card {
         position: relative;
         width: 100%;
@@ -283,6 +299,39 @@ st.markdown("""
     .green-border {
         border: 3.5px solid #2ecc71 !important;
         box-shadow: 0 0 8px rgba(46, 204, 113, 0.5) !important;
+    }
+
+    /* Gesperrte Kachel */
+    .card-locked {
+        background-color: #1e293b !important;
+        border: 3.5px dashed #64748b !important;
+        box-shadow: none !important;
+    }
+
+    .lock-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: #94a3b8;
+        z-index: 5;
+        background: radial-gradient(circle, #334155 0%, #1e293b 100%);
+    }
+    .lock-icon {
+        font-size: clamp(1.2rem, 4.5vw, 1.8rem);
+        margin-bottom: 2px;
+    }
+    .lock-label {
+        font-size: clamp(0.5rem, 1.8vw, 0.68rem);
+        font-weight: bold;
+        color: #cbd5e1;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
     }
 
     .bingo-card img {
@@ -307,7 +356,6 @@ st.markdown("""
         z-index: 1;
     }
 
-    /* Beschriftungs-Balken */
     .card-title-bar {
         position: relative;
         z-index: 2;
@@ -325,7 +373,6 @@ st.markdown("""
         white-space: nowrap;
     }
 
-    /* Horizontaler Trennbalken vor der 4. Zeile */
     .horizontal-divider {
         width: 100%;
         height: 8px;
@@ -335,7 +382,6 @@ st.markdown("""
         margin-bottom: 12px;
     }
 
-    /* 6. Roter BINGO-Stempel mit Datumsanzeige */
     .stamp-overlay {
         position: absolute;
         top: 42%;
@@ -366,7 +412,6 @@ st.markdown("""
         color: #b70928;
     }
 
-    /* 7. Grid-Buttons kompakt */
     div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button,
     div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] div[data-testid="stPopover"] button {
         width: 100% !important;
@@ -390,7 +435,6 @@ st.markdown("""
         z-index: 999999 !important;
     }
 
-    /* 8. Funktions-Buttons unten: sauber mehrzeilig & gut lesbar */
     .action-btn-box div[data-testid="stButton"] button,
     div[data-testid="stDownloadButton"] button {
         height: auto !important;
@@ -408,6 +452,42 @@ st.markdown("""
         text-align: center !important;
         border-radius: 8px !important;
     }
+
+    /* Legenden-Box */
+    .legend-card {
+        background-color: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 15px;
+        color: #e2e8f0;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+    .legend-title {
+        font-weight: bold;
+        font-size: 0.95rem;
+        color: #38bdf8;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .legend-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 6px 12px;
+    }
+    .legend-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .legend-icon {
+        font-size: 1.1rem;
+        min-width: 22px;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -420,42 +500,28 @@ st.markdown("<div class='bingo-sub'>Nora & Dominik Aktivitäten-Board 😊</div>
 # ---------------------------------------------------------
 # Belohnungen prüfen & Smarte Ballon-Logik (nur bei NEUEN vollen Reihen)
 # ---------------------------------------------------------
-# Definition aller möglichen Linien: (ID, Kachel-Indizes, Name, Belohnungs-Feld Index)
-lines_to_check = [
-    ("row_0", [0, 1, 2], "Reihe 1", 3),
-    ("row_1", [4, 5, 6], "Reihe 2", 7),
-    ("row_2", [8, 9, 10], "Reihe 3", 11),
-    ("col_0", [0, 4, 8], "Spalte 1", 12),
-    ("col_1", [1, 5, 9], "Spalte 2", 13),
-    ("col_2", [2, 6, 10], "Spalte 3", 14),
-    ("diag_main", [0, 5, 10], "Diagonale", 15)
-]
-
 completed_banners = []
 celebrated = set(data.get("_celebrated_lines", []))
 newly_completed = []
 
-for line_id, tile_indices, line_name, reward_idx in lines_to_check:
+for reward_idx, (line_id, tile_indices, line_name) in REWARD_REQUIREMENTS.items():
     is_line_done = all(data.get(str(i), {}).get("done", False) for i in tile_indices)
-    reward_name = data.get(str(reward_idx), {}).get("title", f"Belohnung")
+    reward_title = data.get(str(reward_idx), {}).get("title", f"Belohnung")
 
     if is_line_done:
-        completed_banners.append(f"🎉 **{line_name} komplett:** Ihr habt die Belohnung *'{reward_name}'* freigeschaltet!")
+        completed_banners.append(f"🎉 **{line_name} komplett:** Belohnung *'{reward_title}'* freigeschaltet!")
         if line_id not in celebrated:
             newly_completed.append(line_id)
     else:
-        # Falls ein Feld abgewählt wurde, wieder aus der Liste freigeben
         if line_id in celebrated:
             celebrated.remove(line_id)
 
-# Wenn mindestens eine Reihe ganz NEU fertiggestellt wurde -> Feiern mit Ballons!
 if newly_completed:
     celebrated.update(newly_completed)
     data["_celebrated_lines"] = list(celebrated)
     save_data(data, create_backup=False)
     st.balloons()
 
-# Bestehende Belohnungen anzeigen
 for banner in completed_banners:
     st.success(banner)
 
@@ -473,75 +539,115 @@ for row in range(GRID_SIZE):
         item = data[k]
 
         is_reward = (row == 3 or col == 3)
-        border_class = " green-border" if is_reward else ""
+        unlocked = is_reward_unlocked(idx, data) if is_reward else True
 
         with cols[col]:
-            # Stempel erzeugen (mit Datumsstempel)
-            if item.get("done", False):
-                date_label = item.get("done_date", "")
-                date_html = f"<span class='stamp-date'>{date_label.split(',')[0]}</span>" if date_label else ""
-                stamp_html = f"<div class='stamp-overlay'>BINGO!{date_html}</div>"
+            if is_reward and not unlocked:
+                # GESPERRTE BELOHNUNG: Maskiert mit Schloss
+                req_info = REWARD_REQUIREMENTS[idx][2]
+                card_html = f"""
+                <div class='bingo-card card-locked' title='Gesperrt: Erledigt erst {req_info}!'>
+                    <div class='lock-overlay'>
+                        <div class='lock-icon'>🔒</div>
+                        <div class='lock-label'>Gesperrt</div>
+                    </div>
+                </div>
+                """
+                st.markdown(card_html, unsafe_allow_html=True)
+
+                # Bei gesperrten Feldern: Buttons passend sperren / nur Popover für Konfiguration
+                btn1, btn2 = st.columns(2)
+                with btn1:
+                    st.button("🔒", key=f"locked_{idx}", disabled=True, use_container_width=True, help=f"Gesperrt! Benötigt: {req_info}")
+
+                with btn2:
+                    with st.popover("✏️", use_container_width=True, help="Geheime Belohnung vorbereiten"):
+                        st.markdown(f"**🎁 Geheime Belohnung #{idx+1} bearbeiten**")
+                        st.caption(f"🔒 Schaltet sich automatisch frei durch: **{req_info}**")
+                        new_title = st.text_input("Name der Belohnung (noch geheim)", value=item.get("title", ""), key=f"t_{idx}")
+                        new_desc = st.text_input("Notiz (optional)", value=item.get("description", ""), key=f"d_{idx}")
+                        uploaded_file = st.file_uploader("Belohnungs-Bild hochladen", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
+
+                        if st.button("Speichern", key=f"s_{idx}", type="primary", use_container_width=True):
+                            data[k]["title"] = new_title
+                            data[k]["description"] = new_desc
+                            if uploaded_file is not None:
+                                image = Image.open(uploaded_file)
+                                image.thumbnail((500, 500))
+                                buf = io.BytesIO()
+                                image.convert("RGB").save(buf, format="JPEG", quality=82)
+                                data[k]["image_b64"] = base64.b64encode(buf.getvalue()).decode()
+                            save_data(data)
+                            st.success("Gespeichert!")
+                            st.rerun()
+
             else:
-                stamp_html = ""
+                # OFFENES FELD (Aktivität ODER freigeschaltete Belohnung)
+                border_class = " green-border" if is_reward else ""
 
-            # Titel ermitteln
-            default_label = f"🎁 Belohnung" if is_reward else f"Aktivität #{idx+1}"
-            title_text = item.get("title", default_label).strip()
-            if not title_text:
-                title_text = default_label
+                if item.get("done", False):
+                    date_label = item.get("done_date", "")
+                    date_html = f"<span class='stamp-date'>{date_label.split(',')[0]}</span>" if date_label else ""
+                    stamp_html = f"<div class='stamp-overlay'>BINGO!{date_html}</div>"
+                else:
+                    stamp_html = ""
 
-            title_html = f"<div class='card-title-bar' title='{title_text}'>{title_text}</div>"
+                default_label = "🎁 Belohnung" if is_reward else f"Aktivität #{idx+1}"
+                title_text = item.get("title", default_label).strip()
+                if not title_text:
+                    title_text = default_label
 
-            # Bild oder Platzhalter laden
-            if item.get("image_b64"):
-                img_src = f"data:image/jpeg;base64,{item['image_b64']}"
-                content_html = f"<img src='{img_src}' alt='{title_text}'>"
-            else:
-                icon = "🎁" if is_reward else "📷"
-                content_html = f"<div class='placeholder-box'>{icon}</div>"
+                title_html = f"<div class='card-title-bar' title='{title_text}'>{title_text}</div>"
 
-            card_html = f"<div class='bingo-card{border_class}'>{content_html}{title_html}{stamp_html}</div>"
-            st.markdown(card_html, unsafe_allow_html=True)
+                if item.get("image_b64"):
+                    img_src = f"data:image/jpeg;base64,{item['image_b64']}"
+                    content_html = f"<img src='{img_src}' alt='{title_text}'>"
+                else:
+                    icon = "🎁" if is_reward else "📷"
+                    content_html = f"<div class='placeholder-box'>{icon}</div>"
 
-            # Buttons: 🎯 Erledigen & ✏️ Bearbeiten
-            btn1, btn2 = st.columns(2)
-            with btn1:
-                btn_symbol = "↩️" if item.get("done") else "🎯"
-                if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help="Erledigt / Stempel"):
-                    is_now_done = not item.get("done", False)
-                    data[k]["done"] = is_now_done
-                    if is_now_done:
-                        now_str = datetime.datetime.now().strftime("%d.%m.%Y, %H:%M Uhr")
-                        data[k]["done_date"] = now_str
-                    else:
-                        data[k]["done_date"] = None
-                    save_data(data)
-                    st.rerun()
+                card_html = f"<div class='bingo-card{border_class}'>{content_html}{title_html}{stamp_html}</div>"
+                st.markdown(card_html, unsafe_allow_html=True)
 
-            with btn2:
-                pop_help = "Belohnung bearbeiten" if is_reward else "Aktivität bearbeiten"
-                with st.popover("✏️", use_container_width=True, help=pop_help):
-                    field_type = "🎁 Belohnung" if is_reward else "Aktivität"
-                    st.markdown(f"**{field_type} #{idx+1} anpassen**")
-                    if item.get("done") and item.get("done_date"):
-                        st.caption(f"✅ Erledigt am: **{item['done_date']}**")
-
-                    new_title = st.text_input("Name", value=item.get("title", ""), key=f"t_{idx}")
-                    new_desc = st.text_input("Notiz (optional)", value=item.get("description", ""), key=f"d_{idx}")
-                    uploaded_file = st.file_uploader("Foto / Screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
-
-                    if st.button("Speichern", key=f"s_{idx}", type="primary", use_container_width=True):
-                        data[k]["title"] = new_title
-                        data[k]["description"] = new_desc
-                        if uploaded_file is not None:
-                            image = Image.open(uploaded_file)
-                            image.thumbnail((500, 500))
-                            buf = io.BytesIO()
-                            image.convert("RGB").save(buf, format="JPEG", quality=82)
-                            data[k]["image_b64"] = base64.b64encode(buf.getvalue()).decode()
+                btn1, btn2 = st.columns(2)
+                with btn1:
+                    btn_symbol = "↩️" if item.get("done") else "🎯"
+                    btn_help = "BINGO!-Stempel entfernen" if item.get("done") else "Als erledigt markieren (BINGO!)"
+                    if st.button(btn_symbol, key=f"done_{idx}", use_container_width=True, help=btn_help):
+                        is_now_done = not item.get("done", False)
+                        data[k]["done"] = is_now_done
+                        if is_now_done:
+                            now_str = datetime.datetime.now().strftime("%d.%m.%Y, %H:%M Uhr")
+                            data[k]["done_date"] = now_str
+                        else:
+                            data[k]["done_date"] = None
                         save_data(data)
-                        st.success("Gespeichert!")
                         st.rerun()
+
+                with btn2:
+                    pop_help = "Belohnung anpassen" if is_reward else "Aktivität anpassen"
+                    with st.popover("✏️", use_container_width=True, help=pop_help):
+                        field_type = "🎁 Belohnung" if is_reward else "Aktivität"
+                        st.markdown(f"**{field_type} #{idx+1} anpassen**")
+                        if item.get("done") and item.get("done_date"):
+                            st.caption(f"✅ Erledigt am: **{item['done_date']}**")
+
+                        new_title = st.text_input("Name", value=item.get("title", ""), key=f"t_{idx}")
+                        new_desc = st.text_input("Notiz (optional)", value=item.get("description", ""), key=f"d_{idx}")
+                        uploaded_file = st.file_uploader("Foto / Screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"f_{idx}")
+
+                        if st.button("Speichern", key=f"s_{idx}", type="primary", use_container_width=True):
+                            data[k]["title"] = new_title
+                            data[k]["description"] = new_desc
+                            if uploaded_file is not None:
+                                image = Image.open(uploaded_file)
+                                image.thumbnail((500, 500))
+                                buf = io.BytesIO()
+                                image.convert("RGB").save(buf, format="JPEG", quality=82)
+                                data[k]["image_b64"] = base64.b64encode(buf.getvalue()).decode()
+                            save_data(data)
+                            st.success("Gespeichert!")
+                            st.rerun()
 
 st.write("---")
 
@@ -565,7 +671,7 @@ with col_dice:
             chosen = random.choice(open_activities)
             st.session_state["picked_date"] = chosen
         else:
-            st.session_state["picked_date"] = "🎉 Alle 9 Aktivitäten sind erledigt! Zeit für Belohnungen!"
+            st.session_state["picked_date"] = "🎉 Alle 9 Aktivitäten sind erledigt! Zeit für eure Belohnungen!"
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col_export:
@@ -633,3 +739,21 @@ with st.expander("⚙️ Optionen & Speicherpunkte"):
         save_data(data, create_backup=True)
         st.success("Alle Stempel wurden zurückgesetzt (vorheriger Stand wurde gesichert)!")
         st.rerun()
+
+# ---------------------------------------------------------
+# 📖 Symbol-Legende ganz unten
+# ---------------------------------------------------------
+st.markdown("""
+<div class='legend-card'>
+    <div class='legend-title'>📖 Legende & Symbole</div>
+    <div class='legend-grid'>
+        <div class='legend-item'><div class='legend-icon'>🎯</div><div><b>Zielscheibe:</b> Aktivität als erledigt markieren (setzt roten BINGO!-Stempel).</div></div>
+        <div class='legend-item'><div class='legend-icon'>↩️</div><div><b>Pfeil zurück:</b> Erledigt-Status wieder aufheben / Stempel entfernen.</div></div>
+        <div class='legend-item'><div class='legend-icon'>✏️</div><div><b>Stift:</b> Feld bearbeiten (Name, Beschreibung und eigenes Foto hochladen).</div></div>
+        <div class='legend-item'><div class='legend-icon'>🔒</div><div><b>Schloss:</b> Belohnung ist noch geheim! Erledigt erst die zugehörige 3er-Reihe.</div></div>
+        <div class='legend-item'><div class='legend-icon'>🎁</div><div><b>Geschenk:</b> Freigeschaltete Belohnung mit grünem Rand!</div></div>
+        <div class='legend-item'><div class='legend-icon'>🎲</div><div><b>Würfel:</b> Wählt per Zufall eine noch offene Aktivität aus.</div></div>
+        <div class='legend-item'><div class='legend-icon'>📥</div><div><b>Download:</b> Speichert das aktuelle Board als Bild zum Ausdrucken oder Teilen.</div></div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
